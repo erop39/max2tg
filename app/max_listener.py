@@ -288,8 +288,7 @@ def create_max_client(
             log.info("Unread-only mode: read marks loaded from snapshot")
 
         if client.mute_tracker:
-            client.mute_tracker.load_from_chats(snapshot.get("chats", []))
-            log.info("Skip-muted mode: mute state loaded from snapshot")
+            client.mute_tracker.load_from_snapshot(snapshot)
 
         if participant_ids:
             log.info("Batch-resolving %d participants...", len(participant_ids))
