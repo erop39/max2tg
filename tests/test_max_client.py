@@ -296,3 +296,18 @@ class TestMaskSensitive:
         masked = MaxClient._mask_sensitive(text)
         assert 'my-secret-token' not in masked
         assert 'MAX_TOKEN=***' in masked
+
+
+class TestSettingsHasChats:
+    def test_top_level_chats(self):
+        assert MaxClient._settings_has_chats({"chats": {"1": {"dontDisturbUntil": -1}}}) is True
+
+    def test_nested_settings_chats(self):
+        assert MaxClient._settings_has_chats({
+            "settings": {"chats": {"1": {"dontDisturbUntil": -1}}},
+        }) is True
+
+    def test_empty_or_missing(self):
+        assert MaxClient._settings_has_chats({}) is False
+        assert MaxClient._settings_has_chats({"settings": {}}) is False
+

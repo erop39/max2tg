@@ -119,6 +119,7 @@ class MaxClient:
         self._on_disconnect_cb = None
         self._auth_pending = False
         self._auth_timeout_task: asyncio.Task | None = None
+        self._config_hash: str | None = None
         self.chat_ids: list[int] = []
         if chat_ids:
             self.chat_ids.extend(map(int, map(str.strip, chat_ids.split(','))))
@@ -315,7 +316,11 @@ class MaxClient:
                 await self._send(
                     OpCode.AUTH_SNAPSHOT,
                     {
-                        "chatsCount": 10,
+                        "chatsCount": 40,
+                        "chatsSync": 0,
+                        "contactsSync": 0,
+                        "presenceSync": 0,
+                        "draftsSync": 0,
                         "interactive": True,
                         "token": self.token,
                     },
@@ -325,6 +330,9 @@ class MaxClient:
             elif op == OpCode.AUTH_SNAPSHOT and cmd == 1:
                 self._clear_auth_timeout()
                 self._my_id = payload.get("profile", {}).get("id")
+                snapshot_hash = payload.get("hash")
+                if snapshot_hash is not None:
+                    self._config_hash = str(snapshot_hash)
                 log.info("Authorized! my_id=%s", self._my_id)
                 if self.debug:
                     self._dump_json("snapshot.json", payload)
@@ -338,13 +346,16 @@ class MaxClient:
 
             elif op == OpCode.NOTIF_CHAT:
                 if self.mute_tracker:
-                    chat = payload.get("chat")
-                    if isinstance(chat, dict):
-                        self.mute_tracker.update_chat(chat)
+                    self.mute_tracker.update_from_payload(payload)
 
-            elif op in (OpCode.NOTIF_CONFIG, OpCode.CONFIG):
+            elif op == OpCode.NOTIF_CONFIG:
                 if self.mute_tracker:
-                    self.mute_tracker.on_settings(payload)
+                    config = payload.get("config") or {}
+                    config_hash = config.get("hash")
+                    if config_hash is not None:
+                        self._config_hash = str(config_hash)
+                    task = asyncio.create_task(self._refresh_mute_settings(config_hash))
+                    task.add_done_callback(_log_task_exception)
 
             elif op == OpCode.DISPATCH:
                 self._dispatch_counter += 1
@@ -368,6 +379,45 @@ class MaxClient:
                 log.info("<<< EVENT op=%-4s cmd=%-3s | %s", op, cmd, self._mask_sensitive(payload_preview[:500]))
 
     # ── WebSocket RPC: fetch contacts ──────────────────────────────
+
+    @staticmethod
+    def _settings_has_chats(resp: dict) -> bool:
+        if not resp:
+            return False
+        if isinstance(resp.get("chats"), dict):
+            return True
+        settings = resp.get("settings")
+        return isinstance(settings, dict) and isinstance(settings.get("chats"), dict)
+
+    async def fetch_settings(self, config_hash: str | None = None) -> dict:
+        """Request per-chat notification settings (mute) via opcode 22."""
+        candidates: list[dict] = []
+        h = config_hash or self._config_hash
+        if h:
+            candidates.extend([
+                {"hash": h},
+                {"config": {"hash": h}},
+            ])
+        candidates.extend([{}, {"settings": {}}])
+
+        for payload in candidates:
+            resp = await self.cmd(OpCode.CONFIG, payload, timeout=8)
+            if self._settings_has_chats(resp):
+                if resp.get("hash") is not None:
+                    self._config_hash = str(resp["hash"])
+                return resp
+        return {}
+
+    async def _refresh_mute_settings(self, config_hash: str | None = None) -> None:
+        if not self.mute_tracker:
+            return
+        before = self.mute_tracker.muted_count()
+        resp = await self.fetch_settings(config_hash)
+        if resp:
+            self.mute_tracker.update_from_payload(resp)
+        after = self.mute_tracker.muted_count()
+        if resp or after != before:
+            log.info("Mute state refreshed from CONFIG: %d muted chat(s)", after)
 
     async def fetch_contacts(self, contact_ids: list[int]) -> dict:
         """Fetch contact info via WS opcode 32. Returns raw response payload."""
