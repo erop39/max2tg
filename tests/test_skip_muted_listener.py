@@ -5,7 +5,17 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.max_client import MaxMessage
-from app.max_listener import create_max_client
+from app.max_listener import _startup_message, create_max_client
+
+
+class TestStartupMessage:
+    def test_without_muted_count(self):
+        assert _startup_message(32) == "✅ <b>Max:</b> подключён | чатов: 32"
+
+    def test_with_muted_count(self):
+        text = _startup_message(32, 7)
+        assert "чатов: 32" in text
+        assert "🔇 из них без звука: 7" in text
 
 
 @pytest.fixture
@@ -71,3 +81,20 @@ class TestSkipMutedListener:
             MaxMessage(chat_id=100, sender_id=2, text="hello")
         )
         sender.send.assert_called()
+
+    async def test_startup_shows_muted_count(self, muted_client):
+        client, sender = muted_client
+        client.fetch_settings = AsyncMock(return_value={})
+        await client._on_ready_cb({
+            "profile": {"id": 1, "names": []},
+            "chats": [{"id": 100, "type": "GROUP", "title": "Test", "participants": {}}],
+            "settings": {
+                "chats": {
+                    "100": {"dontDisturbUntil": -1},
+                    "200": {"dontDisturbUntil": -1},
+                }
+            },
+        })
+        text = sender.send.call_args[0][0]
+        assert "чатов: 1" in text
+        assert "🔇 из них без звука: 2" in text
