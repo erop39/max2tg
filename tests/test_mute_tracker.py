@@ -105,3 +105,9 @@ class TestMuteTracker:
             "dontDisturbUntil": -1,
         })
         assert mt.is_muted(-123) is True
+
+    def test_muted_count(self):
+        mt = MuteTracker()
+        assert mt.muted_count() == 0
+        mt.update_chat({"id": 1, "dontDisturbUntil": -1})
+        assert mt.muted_count() == 1

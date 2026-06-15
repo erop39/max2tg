@@ -44,13 +44,19 @@ class MuteTracker:
                 self.update_chat(chat)
 
     def load_from_snapshot(self, snapshot: dict) -> None:
-        """Load mute state from AUTH_SNAPSHOT (chats list + settings.chats map)."""
+        """Load mute state from AUTH_SNAPSHOT (chats list + settings/config maps)."""
         self.load_from_chats(snapshot.get("chats", []))
         self.on_settings(snapshot)
+        config = snapshot.get("config")
+        if isinstance(config, dict):
+            self.on_settings(config)
         log.info(
             "Mute state loaded from snapshot: %d muted chat(s)",
             len(self._permanent),
         )
+
+    def muted_count(self) -> int:
+        return len(self._permanent)
 
     def update_from_payload(self, payload: dict) -> None:
         """Apply mute updates from NOTIF_CHAT / NOTIF_CONFIG payloads."""
