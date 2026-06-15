@@ -59,17 +59,45 @@ sudo systemctl restart sshd
 
 ---
 
-## 2. Загрузка вашей версии на сервер
+## 2. Загрузка с GitHub
 
-**Вариант A — через git (приватный репозиторий):**
+Репозиторий: **https://github.com/erop39/max2tg** (private)
+
+### Первичная установка на VPS
 
 ```bash
 sudo mkdir -p /opt/max2tg
 sudo chown max2tg:max2tg /opt/max2tg
-sudo -u max2tg git clone git@github.com:ВАШ_АККАУНТ/max2tg.git /opt/max2tg
+
+# HTTPS (запросит логин GitHub + Personal Access Token вместо пароля)
+sudo -u max2tg git clone https://github.com/erop39/max2tg.git /opt/max2tg
+
+# или SSH, если ключ max2tg добавлен в GitHub → Settings → SSH keys
+# sudo -u max2tg git clone git@github.com:erop39/max2tg.git /opt/max2tg
 ```
 
-**Вариант B — архив с локального ПК (без публикации кода):**
+**Вариант B — архив** (если git на VPS не настроен): см. ниже в старом разделе tar.
+
+### Обновление кода на VPS (без потери .env)
+
+```bash
+sudo bash /opt/max2tg/scripts/vps-update.sh
+```
+
+Или вручную:
+
+```bash
+cd /opt/max2tg
+sudo -u max2tg git pull origin main
+sudo -u max2tg .venv/bin/pip install -r requirements.txt -q
+sudo systemctl restart max2tg
+```
+
+Файл `.env` при `git pull` **не меняется**.
+
+---
+
+## 2b. Загрузка архивом (альтернатива)
 
 На Windows (PowerShell):
 
@@ -193,9 +221,13 @@ sudo journalctl -u max2tg -f
 ## 7. Обновление бота
 
 ```bash
-cd /opt/max2tg
-sudo -u max2tg git pull          # или залить новый архив
-docker compose up -d --build     # или: sudo systemctl restart max2tg
+sudo bash /opt/max2tg/scripts/vps-update.sh
+```
+
+Или с ПК после `git push`:
+
+```bash
+ssh user@ВАШ_IP 'sudo bash /opt/max2tg/scripts/vps-update.sh'
 ```
 
 Файл `.env` при обновлении кода **не перезаписывается**.

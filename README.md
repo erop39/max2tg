@@ -226,24 +226,49 @@ Max (WebSocket) ──→ max2tg ──→ [SOCKS5 proxy] ──→ Telegram Bot
 
 ## Ваш репозиторий на GitHub
 
-Форк основан на [Aist/max2tg](https://github.com/Aist/max2tg). В git **не попадают**:
-`.env`, `logs/`, `debug/`, `.venv/` (см. `.gitignore`).
+**Репозиторий:** [github.com/erop39/max2tg](https://github.com/erop39/max2tg) (приватный)
+
+В git **не попадают**: `.env`, `logs/`, `debug/`, `.venv/` — см. `.gitignore`.
+
+### Клонирование (новая машина)
 
 ```bash
-# один раз: имя и email для коммитов (только в этом репозитории)
-git config user.name "Ваше Имя"
-git config user.email "you@example.com"
-
-git commit -m "Fork: plugins, unread/muted filters, deploy docs"
-
-# на github.com → New repository → Private → без README
-git remote add origin https://github.com/ВАШ_ЛОГИН/max2tg.git
-git push -u origin main
+git clone https://github.com/erop39/max2tg.git
+cd max2tg
+cp .env.example .env
+# заполните .env — секреты только локально
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt pytest pytest-asyncio
+python -m app.main
 ```
 
-Обновления с оригинала: `git fetch upstream && git merge upstream/main`
+SSH (если настроен ключ GitHub):
 
-На новой машине: `git clone` → `cp .env.example .env` → заполнить секреты локально.
+```bash
+git clone git@github.com:erop39/max2tg.git
+```
+
+### Ежедневная работа
+
+```bash
+git pull origin main          # получить изменения
+# правки → commit → push
+git add .
+git commit -m "описание"
+git push origin main
+```
+
+CI: при каждом push на `main` GitHub Actions запускает `pytest` (см. `.github/workflows/ci.yml`).
+
+### Обновление оригинала (upstream)
+
+```bash
+git fetch upstream
+git merge upstream/main
+git push origin main
+```
+
+Remotes: `origin` — ваш форк, `upstream` — [Aist/max2tg](https://github.com/Aist/max2tg).
 
 ## Структура проекта
 
