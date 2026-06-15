@@ -47,6 +47,42 @@ def _guess_media_kind(filename: str) -> str:
     return "document"
 
 
+def _looks_like_voice(attach: dict) -> bool:
+    """Detect voice/audio notes, including Max _type UNSUPPORTED with token."""
+    atype = attach.get("_type", "")
+    if atype in ("AUDIO", "VOICE"):
+        return True
+    if atype in ("UNSUPPORTED", "UNKNOWN"):
+        return bool(
+            attach.get("token")
+            or attach.get("audioId")
+            or attach.get("duration") is not None
+            or attach.get("wave")
+        )
+    return False
+
+
+async def _send_voice_attach(
+    attach: dict,
+    client: MaxClient,
+    sender: TelegramSender,
+    header_text: str,
+    chat_id: Any,
+    message_id: Any,
+    kb=None,
+) -> bool:
+    url = _extract_file_url(attach) or attach.get("baseUrl")
+    if not url:
+        url = await client.resolve_attach_url(attach, chat_id, message_id)
+    if url:
+        data = await client.download_file(url)
+        if data:
+            await sender.send_voice(data, caption=header_text, reply_markup=kb)
+            return True
+    await sender.send(f"{header_text}\n<i>[аудио — не удалось загрузить]</i>", reply_markup=kb)
+    return True
+
+
 async def _send_attach(
     attach: dict,
     client: MaxClient,
@@ -117,15 +153,10 @@ async def _send_attach(
         await sender.send(f"{header_text}\n📎 <b>{escape(name)}</b>{size_str}", reply_markup=kb)
         return True
 
-    if atype == "AUDIO":
-        url = attach.get("url")
-        if url:
-            data = await client.download_file(url)
-            if data:
-                await sender.send_voice(data, caption=header_text, reply_markup=kb)
-                return True
-        await sender.send(f"{header_text}\n<i>[аудио]</i>", reply_markup=kb)
-        return True
+    if atype == "AUDIO" or _looks_like_voice(attach):
+        return await _send_voice_attach(
+            attach, client, sender, header_text, chat_id, message_id, kb=kb,
+        )
 
     if atype == "STICKER":
         url = attach.get("url")

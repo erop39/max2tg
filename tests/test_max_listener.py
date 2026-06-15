@@ -1,7 +1,54 @@
 """Tests for app/max_listener.py — pure helper functions."""
 
 import pytest
-from app.max_listener import _human_size, _guess_media_kind
+from unittest.mock import AsyncMock
+
+from app.max_listener import (
+    _guess_media_kind,
+    _human_size,
+    _looks_like_voice,
+    _send_voice_attach,
+)
+from app.max_client import MaxClient
+
+
+class TestLooksLikeVoice:
+    def test_audio_type(self):
+        assert _looks_like_voice({"_type": "AUDIO"}) is True
+
+    def test_unsupported_with_token(self):
+        assert _looks_like_voice({"_type": "UNSUPPORTED", "token": "abc"}) is True
+
+    def test_unsupported_without_audio_fields(self):
+        assert _looks_like_voice({"_type": "UNSUPPORTED"}) is False
+
+    def test_photo_not_voice(self):
+        assert _looks_like_voice({"_type": "PHOTO", "url": "http://x"}) is False
+
+
+class TestExtractPlayUrl:
+    def test_direct_url(self):
+        assert MaxClient._extract_play_url({"url": "https://cdn.example/a.ogg"}) == "https://cdn.example/a.ogg"
+
+    def test_nested_format_url(self):
+        assert MaxClient._extract_play_url({"HIGH": "https://cdn.example/a.mp3"}) == "https://cdn.example/a.mp3"
+
+
+class TestSendVoiceAttach:
+    async def test_unsupported_token_resolves_and_sends(self):
+        client = AsyncMock(spec=MaxClient)
+        client.resolve_attach_url = AsyncMock(return_value="https://cdn.example/v.ogg")
+        client.download_file = AsyncMock(return_value=b"audio-bytes")
+        sender = AsyncMock()
+
+        attach = {"_type": "UNSUPPORTED", "token": "voice-token", "duration": 3000}
+        ok = await _send_voice_attach(
+            attach, client, sender, "header", chat_id=1, message_id="m1",
+        )
+
+        assert ok is True
+        client.resolve_attach_url.assert_awaited_once()
+        sender.send_voice.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------

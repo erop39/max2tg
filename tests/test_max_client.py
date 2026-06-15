@@ -311,3 +311,22 @@ class TestSettingsHasChats:
         assert MaxClient._settings_has_chats({}) is False
         assert MaxClient._settings_has_chats({"settings": {}}) is False
 
+
+class TestMediaOpcodes:
+    def test_video_play_opcode(self):
+        assert OpCode.VIDEO_PLAY == 83
+
+    def test_audio_play_opcode(self):
+        assert OpCode.AUDIO_PLAY == 301
+
+
+class TestExtractPlayUrl:
+    def test_direct_url(self):
+        assert MaxClient._extract_play_url({"url": "https://cdn.example/a.ogg"}) == "https://cdn.example/a.ogg"
+
+    def test_skips_cache_keys(self):
+        assert MaxClient._extract_play_url({
+            "cache": "x",
+            "MEDIUM": "https://cdn.example/a.mp3",
+        }) == "https://cdn.example/a.mp3"
+

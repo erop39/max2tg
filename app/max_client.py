@@ -71,6 +71,8 @@ class OpCode(IntEnum):
     SEND_MESSAGE = 64
     EDIT_MESSAGE = 67
     GET_FILE_URL = 88
+    VIDEO_PLAY = 83
+    AUDIO_PLAY = 301
     CONFIG = 22
     NOTIF_MARK = 130
     NOTIF_CONFIG = 134
@@ -418,6 +420,73 @@ class MaxClient:
         after = self.mute_tracker.muted_count()
         if resp or after != before:
             log.info("Mute state refreshed from CONFIG: %d muted chat(s)", after)
+
+    @staticmethod
+    def _extract_play_url(resp: dict) -> str | None:
+        """Pick a playable/downloadable URL from VIDEO_PLAY / AUDIO_PLAY responses."""
+        if not resp:
+            return None
+        direct = resp.get("url")
+        if isinstance(direct, str) and direct.startswith("http"):
+            return direct
+        skip = {"cache", "EXTERNAL"}
+        for key, value in resp.items():
+            if key in skip:
+                continue
+            if isinstance(value, str) and value.startswith("http"):
+                return value
+        return None
+
+    async def resolve_attach_url(
+        self, attach: dict, chat_id: Any, message_id: Any,
+    ) -> str | None:
+        """Resolve a download URL for FILE / AUDIO / VIDEO attachments."""
+        for key in ("url", "baseUrl"):
+            direct = attach.get(key)
+            if isinstance(direct, str) and direct.startswith("http"):
+                return direct
+
+        if chat_id is None or not message_id:
+            return None
+
+        base = {"chatId": chat_id, "messageId": message_id}
+        file_id = attach.get("fileId")
+        if file_id is not None:
+            resp = await self.cmd(OpCode.GET_FILE_URL, {**base, "fileId": file_id})
+            url = resp.get("url")
+            if url:
+                return url
+
+        token = attach.get("token")
+        if token is not None:
+            resp = await self.cmd(OpCode.AUDIO_PLAY, {**base, "token": token})
+            url = self._extract_play_url(resp)
+            if url:
+                log.info("Resolved audio URL via AUDIO_PLAY token")
+                return url
+            resp = await self.cmd(OpCode.GET_FILE_URL, {**base, "token": token})
+            url = resp.get("url")
+            if url:
+                log.info("Resolved audio URL via GET_FILE_URL token")
+                return url
+
+        audio_id = attach.get("audioId")
+        if audio_id is not None:
+            resp = await self.cmd(OpCode.AUDIO_PLAY, {**base, "audioId": audio_id})
+            url = self._extract_play_url(resp)
+            if url:
+                log.info("Resolved audio URL via AUDIO_PLAY audioId")
+                return url
+
+        video_id = attach.get("videoId")
+        if video_id is not None:
+            resp = await self.cmd(OpCode.VIDEO_PLAY, {**base, "videoId": video_id})
+            url = self._extract_play_url(resp)
+            if url:
+                log.info("Resolved video URL via VIDEO_PLAY")
+                return url
+
+        return None
 
     async def fetch_contacts(self, contact_ids: list[int]) -> dict:
         """Fetch contact info via WS opcode 32. Returns raw response payload."""
