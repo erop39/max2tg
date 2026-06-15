@@ -1,8 +1,10 @@
+import asyncio
 import logging
 from datetime import datetime
 from html import escape
 from typing import Any
 
+from app.hooks import HookEvent, hooks
 from app.max_client import MaxClient, MaxMessage, OpCode
 from app.resolver import ContactResolver
 from app.tg_sender import TelegramSender, reply_keyboard
@@ -253,8 +255,12 @@ def _human_size(n: int) -> str:
 def create_max_client(
     max_token: str, max_device_id: str, sender: TelegramSender, max_chat_ids: str | None = None,
     debug: bool = False, reply_enabled: bool = False,
+    unread_only: bool = False, unread_delay_sec: float = 2.0, skip_muted: bool = False,
 ) -> MaxClient:
-    client = MaxClient(token=max_token, device_id=max_device_id, debug=debug, chat_ids=max_chat_ids)
+    client = MaxClient(
+        token=max_token, device_id=max_device_id, debug=debug, chat_ids=max_chat_ids,
+        unread_only=unread_only, skip_muted=skip_muted,
+    )
     resolver = ContactResolver(client=client)
 
     _first_connect = True
@@ -276,6 +282,15 @@ def create_max_client(
         nonlocal _first_connect
         participant_ids = resolver.load_snapshot(snapshot)
 
+        if client.read_tracker:
+            client.read_tracker.set_my_id(resolver._my_id)
+            client.read_tracker.load_from_chats(snapshot.get("chats", []))
+            log.info("Unread-only mode: read marks loaded from snapshot")
+
+        if client.mute_tracker:
+            client.mute_tracker.load_from_chats(snapshot.get("chats", []))
+            log.info("Skip-muted mode: mute state loaded from snapshot")
+
         if participant_ids:
             log.info("Batch-resolving %d participants...", len(participant_ids))
             await resolver.resolve_users_batch(participant_ids)
@@ -283,6 +298,14 @@ def create_max_client(
 
             log.info("Known chats: %s", resolver.chats)
             log.info("Known users: %s", resolver.users)
+
+        await hooks.emit(
+            HookEvent.ON_READY,
+            snapshot=snapshot,
+            resolver=resolver,
+            client=client,
+            is_reconnect=not _first_connect,
+        )
 
         if not _first_connect:
             await sender.send("✅ <b>Max:</b> соединение восстановлено")
@@ -294,6 +317,7 @@ def create_max_client(
     @client.on_disconnect
     async def handle_disconnect():
         nonlocal _notif_count, _last_notif_time
+        await hooks.emit(HookEvent.ON_DISCONNECT, client=client, resolver=resolver)
         if not _can_notify():
             log.info("Disconnect notification suppressed (throttle)")
             return
@@ -315,6 +339,32 @@ def create_max_client(
         if msg.is_self:
             return
 
+        if not await hooks.emit(
+            HookEvent.ON_MESSAGE, msg=msg, resolver=resolver, client=client
+        ):
+            log.info("Message filtered by hook (chat=%s)", msg.chat_id)
+            return
+
+        if client.skip_muted and client.mute_tracker and client.mute_tracker.is_muted(msg.chat_id):
+            log.info("Skipped (muted chat in Max): chat=%s", msg.chat_id)
+            return
+
+        if client.unread_only and client.read_tracker:
+            if unread_delay_sec > 0:
+                await asyncio.sleep(unread_delay_sec)
+            if not client.read_tracker.is_unread(msg.chat_id, msg.timestamp):
+                log.info(
+                    "Skipped (already read in Max): chat=%s msg=%s",
+                    msg.chat_id,
+                    msg.message_id,
+                )
+                return
+
+        async def _message_sent() -> None:
+            await hooks.emit(
+                HookEvent.ON_MESSAGE_SENT, msg=msg, resolver=resolver, client=client
+            )
+
         sender_label = escape(await resolver.resolve_user(msg.sender_id))
         is_dm = resolver.is_dm(msg.chat_id)
         if len(client.chat_ids) == 1:
@@ -332,6 +382,7 @@ def create_max_client(
             if msg.text:
                 await sender.send(f"{header_text}\n{escape(msg.text)}", reply_markup=kb)
             log.info("Forwarded message → TG")
+            await _message_sent()
             return
 
         if link_type == "REPLY":
@@ -339,6 +390,7 @@ def create_max_client(
             if msg.text:
                 await sender.send(f"{full_header}\n<blockquote>{escape(fwd_text)}{attaches_str}</blockquote>{escape(msg.text)}", reply_markup=kb)
             log.info("Forwarded reply → TG")
+            await _message_sent()
             return
 
         meaningful_attaches = [
@@ -359,10 +411,12 @@ def create_max_client(
 
             if msg.text and not text_sent:
                 await sender.send(f"{header_text}\n{escape(msg.text)}", reply_markup=kb)
+            await _message_sent()
         else:
             if msg.text:
                 await sender.send(f"{header_text}\n{escape(msg.text)}", reply_markup=kb)
                 log.info("Forwarded text → TG")
+                await _message_sent()
             else:
                 log.warning("Нетекстовое сообщение! %s", msg.attaches)
 

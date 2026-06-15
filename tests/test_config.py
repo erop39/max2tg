@@ -50,6 +50,7 @@ class TestSettingsDataclass:
         )
         assert s.debug is False
         assert s.reply_enabled is False
+        assert s.plugins_enabled is True
         assert s.max_chat_ids is None
 
 
@@ -112,6 +113,18 @@ class TestLoadSettingsValid:
     def test_reply_enabled_false_via_false(self):
         s = _load_settings_with_env(_env(REPLY_ENABLED="false"))
         assert s.reply_enabled is False
+
+    def test_plugins_enabled_default_true(self):
+        s = _load_settings_with_env(_env())
+        assert s.plugins_enabled is True
+
+    def test_plugins_enabled_false_via_false(self):
+        s = _load_settings_with_env(_env(PLUGINS_ENABLED="false"))
+        assert s.plugins_enabled is False
+
+    def test_plugins_enabled_false_via_0(self):
+        s = _load_settings_with_env(_env(PLUGINS_ENABLED="0"))
+        assert s.plugins_enabled is False
 
     def test_returns_settings_instance(self):
         s = _load_settings_with_env(_env())

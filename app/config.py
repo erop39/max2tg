@@ -17,6 +17,10 @@ class Settings:
     tg_media_write_timeout: int | None = None
     debug: bool = False
     reply_enabled: bool = False
+    plugins_enabled: bool = True
+    unread_only: bool = False
+    unread_delay_sec: float = 2.0
+    skip_muted: bool = False
 
 
 def load_settings() -> Settings:
@@ -39,10 +43,10 @@ def load_settings() -> Settings:
         )
 
     return Settings(
-        max_token=os.environ["MAX_TOKEN"],
-        max_device_id=os.environ["MAX_DEVICE_ID"],
-        tg_bot_token=os.environ["TG_BOT_TOKEN"],
-        tg_chat_id=os.environ["TG_CHAT_ID"],
+        max_token=os.environ["MAX_TOKEN"].strip(),
+        max_device_id=os.environ["MAX_DEVICE_ID"].strip(),
+        tg_bot_token=os.environ["TG_BOT_TOKEN"].strip(),
+        tg_chat_id=os.environ["TG_CHAT_ID"].strip(),
         max_chat_ids=os.environ.get("MAX_CHAT_IDS") or None,
         tg_proxy=os.environ.get("TG_PROXY") or None,
         tg_read_timeout=int(os.environ.get("TG_READ_TIMEOUT", 0)) or None,
@@ -50,4 +54,8 @@ def load_settings() -> Settings:
         tg_media_write_timeout=int(os.environ.get("TG_MEDIA_WRITE_TIMEOUT", 0)) or None,
         debug=os.environ.get("DEBUG", "").lower() in ("1", "true", "yes"),
         reply_enabled=os.environ.get("REPLY_ENABLED", "").lower() in ("1", "true", "yes"),
+        plugins_enabled=os.environ.get("PLUGINS_ENABLED", "true").lower() not in ("0", "false", "no"),
+        unread_only=os.environ.get("UNREAD_ONLY", "").lower() in ("1", "true", "yes"),
+        unread_delay_sec=float(os.environ.get("UNREAD_DELAY_SEC", "2") or "2"),
+        skip_muted=os.environ.get("SKIP_MUTED", "").lower() in ("1", "true", "yes"),
     )

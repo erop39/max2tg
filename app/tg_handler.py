@@ -12,6 +12,7 @@ from telegram.ext import (
 )
 import telegram.constants
 
+from app.hooks import HookEvent, hooks
 from app.max_client import MaxClient
 
 log = logging.getLogger(__name__)
@@ -93,6 +94,27 @@ async def _on_text_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 "from": 2
             }
         ]
+
+    ctx = {
+        "text": text,
+        "elements": elements,
+        "max_chat_id": max_chat_id,
+        "cancel": False,
+    }
+    await hooks.emit(
+        HookEvent.ON_TG_REPLY,
+        ctx=ctx,
+        update=update,
+        max_client=max_client,
+        label=label,
+    )
+    if ctx.get("cancel"):
+        await update.message.reply_text("❌ Ответ отменён плагином.")
+        return
+
+    text = ctx["text"]
+    elements = ctx["elements"]
+
     try:
         resp = await max_client.send_message(max_chat_id, text, elements)
         if resp:

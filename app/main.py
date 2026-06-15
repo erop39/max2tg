@@ -9,7 +9,9 @@ from logging.handlers import RotatingFileHandler
 from telegram import Update
 
 from app.config import load_settings
+from app.hooks import hooks
 from app.max_listener import create_max_client
+from app.plugins import load_plugins
 from app.tg_handler import build_tg_app
 from app.tg_sender import TelegramSender
 
@@ -67,6 +69,12 @@ async def main():
 
     log.info("Debug mode: %s", "ON" if settings.debug else "OFF")
 
+    if settings.plugins_enabled:
+        loaded = load_plugins(hooks)
+        log.info("Plugins enabled: %s", ", ".join(loaded) if loaded else "(none)")
+    else:
+        log.info("Plugins disabled (PLUGINS_ENABLED=false)")
+
     if settings.tg_proxy:
         log.info("Using Telegram proxy: %s", settings.tg_proxy.split("@")[-1])
 
@@ -83,7 +91,17 @@ async def main():
     client = create_max_client(
         settings.max_token, settings.max_device_id, sender, settings.max_chat_ids,
         debug=settings.debug, reply_enabled=settings.reply_enabled,
+        unread_only=settings.unread_only, unread_delay_sec=settings.unread_delay_sec,
+        skip_muted=settings.skip_muted,
     )
+
+    if settings.unread_only:
+        log.info(
+            "Unread-only mode: ON (delay %ss before forward check)",
+            settings.unread_delay_sec,
+        )
+    if settings.skip_muted:
+        log.info("Skip-muted mode: ON (no forwards from muted Max chats)")
 
     tg_app = None
     if settings.reply_enabled:

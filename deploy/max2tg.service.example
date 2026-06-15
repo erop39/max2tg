@@ -1,0 +1,31 @@
+# Скопируйте на VPS:
+#   sudo cp deploy/max2tg.service.example /etc/systemd/system/max2tg.service
+#   sudo nano /etc/systemd/system/max2tg.service   # поправьте пути и пользователя
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now max2tg
+
+[Unit]
+Description=Max to Telegram forwarder (max2tg)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=max2tg
+Group=max2tg
+WorkingDirectory=/opt/max2tg
+ExecStart=/opt/max2tg/.venv/bin/python -m app.main
+Restart=always
+RestartSec=10
+
+# Секреты только из файла с правами 600 (см. DEPLOY.md)
+EnvironmentFile=/opt/max2tg/.env
+
+# Запрет записи в системные каталоги (разрешены только logs и debug)
+ProtectSystem=strict
+ReadWritePaths=/opt/max2tg/logs /opt/max2tg/debug
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

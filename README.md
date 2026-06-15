@@ -75,6 +75,10 @@ cp .env.example .env
 | `TG_CHAT_ID`    | да           | ID чата, куда пересылать сообщения             |
 | `DEBUG`         | нет          | `true` — подробные логи + дамп JSON в `debug/` |
 | `REPLY_ENABLED` | нет          | `true` — разрешить ответы из Telegram в Max    |
+| `PLUGINS_ENABLED` | нет        | `false` — отключить плагины из `app/plugins/` (по умолчанию `true`) |
+| `UNREAD_ONLY` | нет          | `true` — пересылать только непрочитанные (если прочитали в Max — в TG не придёт) |
+| `UNREAD_DELAY_SEC` | нет     | Задержка в секундах перед проверкой прочитанности (по умолчанию `2`) |
+| `SKIP_MUTED` | нет           | `true` — не пересылать из заглушённых чатов Max («без звука») |
 | `LOG_DIR`       | нет          | Путь к директории логов (по умолчанию `logs`)  |
 | `TG_PROXY`      | нет          | SOCKS5-прокси для Telegram (`socks5://host:port`) |
 | `TG_READ_TIMEOUT` | нет        | Таймаут чтения HTTP-ответа от Telegram, в секундах |
@@ -84,6 +88,9 @@ cp .env.example .env
 ## Запуск
 
 ### Docker (рекомендуется для сервера)
+
+> **Безопасный деплой на VPS (права на `.env`, SSH, 24/7):** см. [DEPLOY.md](DEPLOY.md)  
+> **Обновление токена Max и перезапуск:** см. [TOKEN_UPDATE.md](TOKEN_UPDATE.md)
 
 ```bash
 git clone git@github.com:Aist/max2tg.git max2tg
@@ -207,6 +214,37 @@ Max (WebSocket) ──→ max2tg ──→ [SOCKS5 proxy] ──→ Telegram Bot
 2. Новые входящие сообщения пересылаются в указанный Telegram-чат
 3. Если `REPLY_ENABLED=true`, под каждым сообщением появляется кнопка «Ответить» — нажав её, можно написать текст, который отправится обратно в соответствующий чат Max
 
+## Расширения (плагины)
+
+Форк поддерживает **хуки и плагины** для доработки без изменения ядра:
+
+- События: `on_ready`, `on_message`, `on_message_sent`, `on_disconnect`, `on_tg_reply`
+- Автозагрузка модулей из `app/plugins/`
+- Пример: [`app/plugins/example_logger.py`](app/plugins/example_logger.py)
+
+Подробнее: **[EXTENSIONS.md](EXTENSIONS.md)**
+
+## Ваш репозиторий на GitHub
+
+Форк основан на [Aist/max2tg](https://github.com/Aist/max2tg). В git **не попадают**:
+`.env`, `logs/`, `debug/`, `.venv/` (см. `.gitignore`).
+
+```bash
+# один раз: имя и email для коммитов (только в этом репозитории)
+git config user.name "Ваше Имя"
+git config user.email "you@example.com"
+
+git commit -m "Fork: plugins, unread/muted filters, deploy docs"
+
+# на github.com → New repository → Private → без README
+git remote add origin https://github.com/ВАШ_ЛОГИН/max2tg.git
+git push -u origin main
+```
+
+Обновления с оригинала: `git fetch upstream && git merge upstream/main`
+
+На новой машине: `git clone` → `cp .env.example .env` → заполнить секреты локально.
+
 ## Структура проекта
 
 ```
@@ -218,14 +256,20 @@ max2tg/
 │   ├── max_listener.py   # обработка и форматирование сообщений
 │   ├── resolver.py       # кеш и резолвинг имён контактов/чатов
 │   ├── tg_sender.py      # отправка сообщений в Telegram
-│   └── tg_handler.py     # обработка ответов из Telegram
+│   ├── tg_handler.py     # обработка ответов из Telegram
+│   ├── hooks.py          # реестр событий для расширений
+│   └── plugins/          # пользовательские плагины
+│       ├── _base.py
+│       └── example_logger.py
 ├── tests/
 │   ├── test_config.py             # тесты загрузки настроек
 │   ├── test_max_client.py         # тесты клиента Max (опкоды, парсинг)
 │   ├── test_max_listener.py       # тесты форматирования сообщений
 │   ├── test_resolver.py           # тесты резолвинга имён контактов
 │   ├── test_tg_handler.py         # тесты обработки ответов из Telegram
-│   └── test_disconnect_notify.py  # тесты уведомлений о статусе соединения
+│   ├── test_disconnect_notify.py  # тесты уведомлений о статусе соединения
+│   └── test_hooks.py              # тесты хуков и плагинов
+├── EXTENSIONS.md        # руководство по расширению
 ├── logs/                # логи (создаётся автоматически)
 ├── .env.example
 ├── Dockerfile
@@ -323,6 +367,10 @@ cp .env.example .env
 | `TG_CHAT_ID` | yes | Chat ID to forward messages to |
 | `DEBUG` | no | `true` — verbose logs + JSON dumps to `debug/` |
 | `REPLY_ENABLED` | no | `true` — enable replies from Telegram to Max |
+| `PLUGINS_ENABLED` | no | `false` — disable plugins in `app/plugins/` (default `true`) |
+| `UNREAD_ONLY` | no | `true` — forward only unread messages (skip if read in Max) |
+| `UNREAD_DELAY_SEC` | no | Delay before read check in seconds (default `2`) |
+| `SKIP_MUTED` | no | `true` — skip muted / do-not-disturb chats in Max |
 | `LOG_DIR` | no | Log directory path (default: `logs`) |
 | `TG_PROXY` | no | SOCKS5 proxy for Telegram (`socks5://host:port`) |
 | `TG_READ_TIMEOUT` | no | HTTP read timeout for Telegram responses, in seconds |
@@ -454,6 +502,10 @@ Max (WebSocket) ──→ max2tg ──→ [SOCKS5 proxy] ──→ Telegram Bot
 1. The app connects to Max via WebSocket using your account credentials
 2. Incoming messages are forwarded to the specified Telegram chat
 3. If `REPLY_ENABLED=true`, each message includes a "Reply" button — press it, type your response, and it gets sent back to the corresponding Max chat
+
+## Extensions (plugins)
+
+This fork adds **hooks and plugins** for customization without changing core logic. See **[EXTENSIONS.md](EXTENSIONS.md)**.
 
 ## Project Structure
 

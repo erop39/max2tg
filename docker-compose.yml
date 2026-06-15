@@ -4,18 +4,10 @@ services:
   max2tg:
     build: .
     restart: unless-stopped
+    # Секреты только из .env на хосте (chmod 600). Не дублируйте токены в этом файле.
+    env_file:
+      - .env
     environment:
-      MAX_TOKEN:
-      MAX_DEVICE_ID:
-      MAX_CHAT_IDS:
-      TG_BOT_TOKEN:
-      TG_CHAT_ID:
-      TG_PROXY:
-      TG_READ_TIMEOUT:
-      TG_WRITE_TIMEOUT:
-      TG_MEDIA_WRITE_TIMEOUT:
-      DEBUG:
-      REPLY_ENABLED:
       LOG_DIR: /app/logs
     volumes:
       - ./logs:/app/logs

@@ -11,6 +11,9 @@ from typing import Any
 
 import aiohttp
 
+from app.mute_tracker import MuteTracker
+from app.read_tracker import ReadTracker
+
 log = logging.getLogger(__name__)
 
 DEBUG_DIR = "debug"
@@ -68,6 +71,10 @@ class OpCode(IntEnum):
     SEND_MESSAGE = 64
     EDIT_MESSAGE = 67
     GET_FILE_URL = 88
+    CONFIG = 22
+    NOTIF_MARK = 130
+    NOTIF_CONFIG = 134
+    NOTIF_CHAT = 135
     DISPATCH = 128
 
 
@@ -90,10 +97,16 @@ class MaxClient:
     HEARTBEAT_SEC = 30
     RECONNECT_SEC = 5
 
-    def __init__(self, token: str, device_id: str, chat_ids: str | None = None, debug: bool = False):
+    AUTH_TIMEOUT_SEC = 30
+
+    def __init__(self, token: str, device_id: str, chat_ids: str | None = None, debug: bool = False, unread_only: bool = False, skip_muted: bool = False):
         self.token = token
         self.device_id = device_id
         self.debug = debug
+        self.unread_only = unread_only
+        self.skip_muted = skip_muted
+        self.read_tracker = ReadTracker() if unread_only else None
+        self.mute_tracker = MuteTracker() if skip_muted else None
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._seq = 0
         self._my_id = None
@@ -104,6 +117,8 @@ class MaxClient:
         self._dispatch_counter = 0
         self._pending: dict[int, asyncio.Future] = {}
         self._on_disconnect_cb = None
+        self._auth_pending = False
+        self._auth_timeout_task: asyncio.Task | None = None
         self.chat_ids: list[int] = []
         if chat_ids:
             self.chat_ids.extend(map(int, map(str.strip, chat_ids.split(','))))
@@ -155,6 +170,30 @@ class MaxClient:
         finally:
             self._pending.pop(seq, None)
 
+    async def _auth_timeout_loop(self):
+        await asyncio.sleep(self.AUTH_TIMEOUT_SEC)
+        if self._auth_pending:
+            log.error(
+                "Max auth timeout (%ds): сервер не ответил на токен. "
+                "Обновите MAX_TOKEN и MAX_DEVICE_ID из DevTools → "
+                "Application → Local Storage → web.max.ru "
+                "(__oneme_auth и __oneme_device_id). "
+                "Убедитесь, что вы залогинены в браузере и скопировали значения без кавычек.",
+                self.AUTH_TIMEOUT_SEC,
+            )
+
+    def _start_auth_timeout(self):
+        self._auth_pending = True
+        if self._auth_timeout_task:
+            self._auth_timeout_task.cancel()
+        self._auth_timeout_task = asyncio.create_task(self._auth_timeout_loop())
+
+    def _clear_auth_timeout(self):
+        self._auth_pending = False
+        if self._auth_timeout_task:
+            self._auth_timeout_task.cancel()
+            self._auth_timeout_task = None
+
     async def _heartbeat_loop(self):
         while True:
             await asyncio.sleep(self.HEARTBEAT_SEC)
@@ -184,6 +223,7 @@ class MaxClient:
                         self._ws = ws
                         self._seq = 0
                         self._pending.clear()
+                        self._clear_auth_timeout()
 
                         log.info("Connected. Sending handshake...")
                         await self._send(
@@ -218,6 +258,7 @@ class MaxClient:
                 finally:
                     if self._heartbeat_task:
                         self._heartbeat_task.cancel()
+                    self._clear_auth_timeout()
                     for fut in self._pending.values():
                         if not fut.done():
                             fut.cancel()
@@ -255,6 +296,14 @@ class MaxClient:
                 fut.set_result({})
             log.warning("<<< ERROR op=%-4s seq=%s | %s", op, seq, self._mask_sensitive(str(payload)))
 
+        elif cmd == 3 and op == OpCode.AUTH_SNAPSHOT:
+            self._clear_auth_timeout()
+            log.error(
+                "Max auth rejected: %s. "
+                "Проверьте MAX_TOKEN и MAX_DEVICE_ID в .env — скопируйте заново из web.max.ru.",
+                self._mask_sensitive(str(payload)),
+            )
+
         # server-initiated events — not a reply to one of our requests
         else:
             payload_preview = json.dumps(payload, ensure_ascii=False)
@@ -271,8 +320,10 @@ class MaxClient:
                         "token": self.token,
                     },
                 )
+                self._start_auth_timeout()
 
             elif op == OpCode.AUTH_SNAPSHOT and cmd == 1:
+                self._clear_auth_timeout()
                 self._my_id = payload.get("profile", {}).get("id")
                 log.info("Authorized! my_id=%s", self._my_id)
                 if self.debug:
@@ -280,6 +331,20 @@ class MaxClient:
 
                 if self._on_ready_cb:
                     await self._on_ready_cb(payload)
+
+            elif op == OpCode.NOTIF_MARK:
+                if self.read_tracker:
+                    self.read_tracker.on_notif_mark(payload)
+
+            elif op == OpCode.NOTIF_CHAT:
+                if self.mute_tracker:
+                    chat = payload.get("chat")
+                    if isinstance(chat, dict):
+                        self.mute_tracker.update_chat(chat)
+
+            elif op in (OpCode.NOTIF_CONFIG, OpCode.CONFIG):
+                if self.mute_tracker:
+                    self.mute_tracker.on_settings(payload)
 
             elif op == OpCode.DISPATCH:
                 self._dispatch_counter += 1
