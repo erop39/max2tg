@@ -79,6 +79,7 @@ cp .env.example .env
 | `UNREAD_ONLY` | нет          | `true` — пересылать только непрочитанные (если прочитали в Max — в TG не придёт) |
 | `UNREAD_DELAY_SEC` | нет     | Задержка в секундах перед проверкой прочитанности (по умолчанию `2`) |
 | `SKIP_MUTED` | нет           | `true` — не пересылать из заглушённых чатов Max («без звука») |
+| `MUTED_DIGEST_ENABLED` | нет | `true` — накапливать сообщения из заглушённых чатов и выдавать по `/muted` или кнопке `📭 Заглушённые` |
 | `LOG_DIR`       | нет          | Путь к директории логов (по умолчанию `logs`)  |
 | `TG_PROXY`      | нет          | SOCKS5-прокси для Telegram (`socks5://host:port`) |
 | `TG_READ_TIMEOUT` | нет        | Таймаут чтения HTTP-ответа от Telegram, в секундах |
@@ -396,6 +397,7 @@ cp .env.example .env
 | `UNREAD_ONLY` | no | `true` — forward only unread messages (skip if read in Max) |
 | `UNREAD_DELAY_SEC` | no | Delay before read check in seconds (default `2`) |
 | `SKIP_MUTED` | no | `true` — skip muted / do-not-disturb chats in Max |
+| `MUTED_DIGEST_ENABLED` | no | `true` — buffer muted-chat messages and flush them via `/muted` or the `📭 Заглушённые` button |
 | `LOG_DIR` | no | Log directory path (default: `logs`) |
 | `TG_PROXY` | no | SOCKS5 proxy for Telegram (`socks5://host:port`) |
 | `TG_READ_TIMEOUT` | no | HTTP read timeout for Telegram responses, in seconds |

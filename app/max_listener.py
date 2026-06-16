@@ -6,8 +6,9 @@ from typing import Any
 
 from app.hooks import HookEvent, hooks
 from app.max_client import MaxClient, MaxMessage, OpCode
+from app.muted_buffer import MutedMessageBuffer
 from app.resolver import ContactResolver
-from app.tg_sender import TelegramSender, reply_keyboard
+from app.tg_sender import TelegramSender, muted_digest_keyboard, reply_keyboard
 
 log = logging.getLogger(__name__)
 
@@ -252,16 +253,83 @@ def _human_size(n: int) -> str:
     return f"{n:.1f} ТБ"
 
 
+async def forward_message(
+    msg: MaxMessage,
+    client: MaxClient,
+    sender: TelegramSender,
+    resolver: ContactResolver,
+    reply_enabled: bool = False,
+) -> None:
+    sender_label = escape(await resolver.resolve_user(msg.sender_id))
+    is_dm = resolver.is_dm(msg.chat_id)
+    if len(client.chat_ids) == 1:
+        chat_label = ""
+    else:
+        chat_label = escape(resolver.chat_name(msg.chat_id))
+    header_text = _header(msg, sender_label, chat_label, is_dm)
+    kb = reply_keyboard(msg.chat_id) if reply_enabled else None
+
+    link = msg.link
+    link_type = link.get("type") if isinstance(link, dict) else None
+
+    if link_type == "FORWARD":
+        await _handle_forward_message(link, header_text, client, sender, resolver, kb=kb)
+        if msg.text:
+            await sender.send(f"{header_text}\n{escape(msg.text)}", reply_markup=kb)
+        log.info("Forwarded message → TG")
+        return
+
+    if link_type == "REPLY":
+        attaches_str, full_header, fwd_text = await _handle_reply_message(link, header_text, resolver)
+        if msg.text:
+            await sender.send(
+                f"{full_header}\n<blockquote>{escape(fwd_text)}{attaches_str}</blockquote>{escape(msg.text)}",
+                reply_markup=kb,
+            )
+        log.info("Forwarded reply → TG")
+        return
+
+    meaningful_attaches = [
+        a for a in msg.attaches
+        if isinstance(a, dict) and a.get("_type") not in ("CONTROL", "WIDGET", "INLINE_KEYBOARD", None)
+    ]
+
+    if meaningful_attaches:
+        text_sent = False
+        for i, attach in enumerate(meaningful_attaches):
+            if i == 0 and msg.text:
+                cap = f"{header_text}\n{escape(msg.text)}"
+                text_sent = True
+            else:
+                cap = header_text
+            await _send_attach(attach, client, sender, cap, msg.chat_id, msg.message_id, kb=kb)
+            log.info("Forwarded attach _type=%s → TG", attach.get("_type"))
+
+        if msg.text and not text_sent:
+            await sender.send(f"{header_text}\n{escape(msg.text)}", reply_markup=kb)
+        return
+
+    if msg.text:
+        await sender.send(f"{header_text}\n{escape(msg.text)}", reply_markup=kb)
+        log.info("Forwarded text → TG")
+        return
+
+    log.warning("Нетекстовое сообщение! %s", msg.attaches)
+
+
 def create_max_client(
     max_token: str, max_device_id: str, sender: TelegramSender, max_chat_ids: str | None = None,
     debug: bool = False, reply_enabled: bool = False,
     unread_only: bool = False, unread_delay_sec: float = 2.0, skip_muted: bool = False,
+    muted_digest_enabled: bool = False,
+    muted_buffer: MutedMessageBuffer | None = None,
 ) -> MaxClient:
     client = MaxClient(
         token=max_token, device_id=max_device_id, debug=debug, chat_ids=max_chat_ids,
         unread_only=unread_only, skip_muted=skip_muted,
     )
     resolver = ContactResolver(client=client)
+    client.resolver = resolver
 
     _first_connect = True
     _notif_count = 0
@@ -307,11 +375,12 @@ def create_max_client(
             is_reconnect=not _first_connect,
         )
 
+        status_kb = muted_digest_keyboard() if muted_digest_enabled else None
         if not _first_connect:
-            await sender.send("✅ <b>Max:</b> соединение восстановлено")
+            await sender.send("✅ <b>Max:</b> соединение восстановлено", reply_markup=status_kb)
         else:
             chat_count = len(resolver.chats)
-            await sender.send(f"✅ <b>Max:</b> подключён | чатов: {chat_count}")
+            await sender.send(f"✅ <b>Max:</b> подключён | чатов: {chat_count}", reply_markup=status_kb)
         _first_connect = False
 
     @client.on_disconnect
@@ -324,6 +393,16 @@ def create_max_client(
         _notif_count += 1
         _last_notif_time = datetime.now()
         await sender.send("⚠️ <b>Max:</b> соединение потеряно, переподключение...")
+
+    @client.on_mark
+    async def handle_mark(payload: dict) -> None:
+        if not muted_buffer or not client.read_tracker:
+            return
+        chat_id = payload.get("chatId")
+        if chat_id is None:
+            return
+        mark = client.read_tracker.mark_for_chat(chat_id)
+        await muted_buffer.prune_read(chat_id, mark)
 
     @client.on_message
     async def handle_message(msg: MaxMessage):
@@ -345,10 +424,6 @@ def create_max_client(
             log.info("Message filtered by hook (chat=%s)", msg.chat_id)
             return
 
-        if client.skip_muted and client.mute_tracker and client.mute_tracker.is_muted(msg.chat_id):
-            log.info("Skipped (muted chat in Max): chat=%s", msg.chat_id)
-            return
-
         if client.unread_only and client.read_tracker:
             if unread_delay_sec > 0:
                 await asyncio.sleep(unread_delay_sec)
@@ -360,64 +435,20 @@ def create_max_client(
                 )
                 return
 
+        if client.skip_muted and client.mute_tracker and client.mute_tracker.is_muted(msg.chat_id):
+            if muted_digest_enabled and muted_buffer:
+                await muted_buffer.add(msg)
+                log.info("Buffered (muted chat in Max): chat=%s msg=%s", msg.chat_id, msg.message_id)
+            else:
+                log.info("Skipped (muted chat in Max): chat=%s", msg.chat_id)
+            return
+
         async def _message_sent() -> None:
             await hooks.emit(
                 HookEvent.ON_MESSAGE_SENT, msg=msg, resolver=resolver, client=client
             )
 
-        sender_label = escape(await resolver.resolve_user(msg.sender_id))
-        is_dm = resolver.is_dm(msg.chat_id)
-        if len(client.chat_ids) == 1:
-            chat_label = ""
-        else:
-            chat_label = escape(resolver.chat_name(msg.chat_id))
-        header_text = _header(msg, sender_label, chat_label, is_dm)
-        kb = reply_keyboard(msg.chat_id) if reply_enabled else None
-
-        link = msg.link
-        link_type = link.get("type") if isinstance(link, dict) else None
-
-        if link_type == "FORWARD":
-            await _handle_forward_message(link, header_text, client, sender, resolver, kb=kb)
-            if msg.text:
-                await sender.send(f"{header_text}\n{escape(msg.text)}", reply_markup=kb)
-            log.info("Forwarded message → TG")
-            await _message_sent()
-            return
-
-        if link_type == "REPLY":
-            attaches_str, full_header, fwd_text = await _handle_reply_message(link, header_text, resolver)
-            if msg.text:
-                await sender.send(f"{full_header}\n<blockquote>{escape(fwd_text)}{attaches_str}</blockquote>{escape(msg.text)}", reply_markup=kb)
-            log.info("Forwarded reply → TG")
-            await _message_sent()
-            return
-
-        meaningful_attaches = [
-            a for a in msg.attaches
-            if isinstance(a, dict) and a.get("_type") not in ("CONTROL", "WIDGET", "INLINE_KEYBOARD", None)
-        ]
-
-        if meaningful_attaches:
-            text_sent = False
-            for i, attach in enumerate(meaningful_attaches):
-                if i == 0 and msg.text:
-                    cap = f"{header_text}\n{escape(msg.text)}"
-                    text_sent = True
-                else:
-                    cap = header_text
-                await _send_attach(attach, client, sender, cap, msg.chat_id, msg.message_id, kb=kb)
-                log.info("Forwarded attach _type=%s → TG", attach.get("_type"))
-
-            if msg.text and not text_sent:
-                await sender.send(f"{header_text}\n{escape(msg.text)}", reply_markup=kb)
-            await _message_sent()
-        else:
-            if msg.text:
-                await sender.send(f"{header_text}\n{escape(msg.text)}", reply_markup=kb)
-                log.info("Forwarded text → TG")
-                await _message_sent()
-            else:
-                log.warning("Нетекстовое сообщение! %s", msg.attaches)
+        await forward_message(msg, client, sender, resolver, reply_enabled=reply_enabled)
+        await _message_sent()
 
     return client

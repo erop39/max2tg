@@ -117,6 +117,7 @@ class MaxClient:
         self._dispatch_counter = 0
         self._pending: dict[int, asyncio.Future] = {}
         self._on_disconnect_cb = None
+        self._on_mark_cb = None
         self._auth_pending = False
         self._auth_timeout_task: asyncio.Task | None = None
         self.chat_ids: list[int] = []
@@ -135,6 +136,10 @@ class MaxClient:
 
     def on_disconnect(self, func):
         self._on_disconnect_cb = func
+        return func
+
+    def on_mark(self, func):
+        self._on_mark_cb = func
         return func
 
     # ── transport ──────────────────────────────────────────────────
@@ -335,6 +340,8 @@ class MaxClient:
             elif op == OpCode.NOTIF_MARK:
                 if self.read_tracker:
                     self.read_tracker.on_notif_mark(payload)
+                if self._on_mark_cb:
+                    await self._on_mark_cb(payload)
 
             elif op == OpCode.NOTIF_CHAT:
                 if self.mute_tracker:

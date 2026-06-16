@@ -7,6 +7,8 @@ from app.tg_handler import (
     PENDING_REPLY_KEY,
     PENDING_REPLY_LABEL_KEY,
     _on_cancel,
+    _on_muted_button,
+    _on_muted_digest,
     _on_reply_button,
     _on_text_reply,
 )
@@ -319,3 +321,53 @@ class TestOnTextReply:
         args = update.message.reply_text.call_args[0][0]
         assert '<b>evil</b>' not in args
         assert '&lt;b&gt;evil&lt;/b&gt;' in args
+
+
+class TestMutedDigestHandlers:
+    @pytest.mark.asyncio
+    async def test_on_muted_digest_disabled(self):
+        update = _make_message_update("/muted")
+        ctx = _make_context(bot_data={"muted_digest_enabled": False})
+
+        await _on_muted_digest(update, ctx)
+
+        update.message.reply_text.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_on_muted_digest_flushes_and_reports_count(self):
+        update = _make_message_update("/muted")
+        ctx = _make_context(
+            bot_data={
+                "muted_digest_enabled": True,
+                "muted_buffer": MagicMock(),
+                "tg_sender": MagicMock(),
+                "resolver": MagicMock(),
+                "max_client": MagicMock(),
+                "reply_enabled": False,
+            }
+        )
+        with patch("app.tg_handler.flush_muted_digest", new=AsyncMock(return_value=3)) as flush_mock:
+            await _on_muted_digest(update, ctx)
+
+        flush_mock.assert_awaited_once()
+        update.message.reply_text.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_on_muted_button_flushes(self):
+        query = _make_callback_query("muted:flush")
+        update = _make_update_with_query(query)
+        ctx = _make_context(
+            bot_data={
+                "muted_digest_enabled": True,
+                "muted_buffer": MagicMock(),
+                "tg_sender": MagicMock(),
+                "resolver": MagicMock(),
+                "max_client": MagicMock(),
+                "reply_enabled": False,
+            }
+        )
+        with patch("app.tg_handler.flush_muted_digest", new=AsyncMock(return_value=1)) as flush_mock:
+            await _on_muted_button(update, ctx)
+
+        flush_mock.assert_awaited_once()
+        query.message.reply_text.assert_called_once()
