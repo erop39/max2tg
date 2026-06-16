@@ -11,6 +11,7 @@ from telegram import Update
 from app.config import load_settings
 from app.hooks import hooks
 from app.max_listener import create_max_client
+from app.muted_buffer import MutedMessageBuffer
 from app.plugins import load_plugins
 from app.tg_handler import build_tg_app
 from app.tg_sender import TelegramSender
@@ -87,12 +88,16 @@ async def main():
         media_write_timeout=settings.tg_media_write_timeout,
     )
     await sender.start()
+    muted_buffer = MutedMessageBuffer() if settings.muted_digest_enabled else None
+    skip_muted_enabled = settings.skip_muted or settings.muted_digest_enabled
 
     client = create_max_client(
         settings.max_token, settings.max_device_id, sender, settings.max_chat_ids,
         debug=settings.debug, reply_enabled=settings.reply_enabled,
         unread_only=settings.unread_only, unread_delay_sec=settings.unread_delay_sec,
-        skip_muted=settings.skip_muted,
+        skip_muted=skip_muted_enabled,
+        muted_digest_enabled=settings.muted_digest_enabled,
+        muted_buffer=muted_buffer,
     )
 
     if settings.unread_only:
@@ -100,22 +105,26 @@ async def main():
             "Unread-only mode: ON (delay %ss before forward check)",
             settings.unread_delay_sec,
         )
-    if settings.skip_muted:
+    if skip_muted_enabled:
         log.info("Skip-muted mode: ON (no forwards from muted Max chats)")
+    if settings.muted_digest_enabled:
+        log.info("Muted digest mode: ON (/muted command enabled)")
 
     tg_app = None
-    if settings.reply_enabled:
+    if settings.reply_enabled or settings.muted_digest_enabled:
         tg_app = build_tg_app(settings.tg_bot_token, client, settings.tg_chat_id,
-                              proxy_url=settings.tg_proxy, read_timeout=settings.tg_read_timeout, write_timeout=settings.tg_write_timeout)
+                              proxy_url=settings.tg_proxy, read_timeout=settings.tg_read_timeout, write_timeout=settings.tg_write_timeout,
+                              muted_buffer=muted_buffer, muted_digest_enabled=settings.muted_digest_enabled,
+                              sender=sender, resolver=client.resolver, reply_enabled=settings.reply_enabled)
         await tg_app.initialize()
         await tg_app.start()
         await tg_app.updater.start_polling(
             drop_pending_updates=True,
             allowed_updates=Update.ALL_TYPES,
         )
-        log.info("Telegram polling started (reply → Max enabled)")
+        log.info("Telegram polling started")
     else:
-        log.info("Reply to Max disabled (REPLY_ENABLED=false)")
+        log.info("Telegram polling disabled (REPLY_ENABLED=false and MUTED_DIGEST_ENABLED=false)")
 
     log.info("Starting Max listener...")
     try:

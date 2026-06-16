@@ -59,3 +59,6 @@ class ReadTracker:
         except (TypeError, ValueError):
             return True
         return msg_ts > self._marks.get(chat_id, 0)
+
+    def mark_for_chat(self, chat_id: Any) -> int:
+        return self._marks.get(chat_id, 0)

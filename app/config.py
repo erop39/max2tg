@@ -21,6 +21,7 @@ class Settings:
     unread_only: bool = False
     unread_delay_sec: float = 2.0
     skip_muted: bool = False
+    muted_digest_enabled: bool = False
 
 
 def load_settings() -> Settings:
@@ -58,4 +59,5 @@ def load_settings() -> Settings:
         unread_only=os.environ.get("UNREAD_ONLY", "").lower() in ("1", "true", "yes"),
         unread_delay_sec=float(os.environ.get("UNREAD_DELAY_SEC", "2") or "2"),
         skip_muted=os.environ.get("SKIP_MUTED", "").lower() in ("1", "true", "yes"),
+        muted_digest_enabled=os.environ.get("MUTED_DIGEST_ENABLED", "").lower() in ("1", "true", "yes"),
     )

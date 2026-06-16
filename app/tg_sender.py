@@ -21,6 +21,13 @@ def reply_keyboard(max_chat_id) -> InlineKeyboardMarkup:
     ]])
 
 
+def muted_digest_keyboard() -> InlineKeyboardMarkup:
+    """Build keyboard with a button to flush muted-chat backlog."""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("📭 Заглушённые", callback_data="muted:flush")
+    ]])
+
+
 class TelegramSender:
     def __init__(
             self,
