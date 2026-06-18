@@ -121,6 +121,9 @@ class MaxClient:
         self._auth_pending = False
         self._auth_timeout_task: asyncio.Task | None = None
         self._config_hash: str | None = None
+        self._settings_ready_event: asyncio.Event | None = (
+            asyncio.Event() if skip_muted else None
+        )
         self.chat_ids: list[int] = []
         if chat_ids:
             self.chat_ids.extend(map(int, map(str.strip, chat_ids.split(','))))
@@ -142,6 +145,25 @@ class MaxClient:
     def on_mark(self, func):
         self._on_mark_cb = func
         return func
+
+    def _reset_mute_state(self) -> None:
+        if self.mute_tracker:
+            self.mute_tracker.reset()
+        if self.mute_tracker:
+            self._settings_ready_event = asyncio.Event()
+
+    def _notify_mute_settings_ready(self) -> None:
+        event = self._settings_ready_event
+        if event and not event.is_set():
+            event.set()
+
+    async def _run_on_ready(self, payload: dict) -> None:
+        if not self._on_ready_cb:
+            return
+        try:
+            await self._on_ready_cb(payload)
+        except Exception:
+            log.exception("on_ready callback error")
 
     # ── transport ──────────────────────────────────────────────────
 
@@ -223,6 +245,7 @@ class MaxClient:
             while True:
                 try:
                     log.info("Connecting to %s ...", self.WS_URL)
+                    self._reset_mute_state()
                     async with session.ws_connect(
                         self.WS_URL, headers=_WS_HEADERS
                     ) as ws:
@@ -343,7 +366,8 @@ class MaxClient:
                     self._dump_json("snapshot.json", payload)
 
                 if self._on_ready_cb:
-                    await self._on_ready_cb(payload)
+                    task = asyncio.create_task(self._run_on_ready(payload))
+                    task.add_done_callback(_log_task_exception)
 
             elif op == OpCode.NOTIF_MARK:
                 if self.read_tracker:
@@ -355,17 +379,22 @@ class MaxClient:
                 if self.mute_tracker:
                     self.mute_tracker.update_from_payload(payload)
 
-            elif op in (OpCode.NOTIF_CONFIG, OpCode.CONFIG):
+            elif op == OpCode.NOTIF_CONFIG:
                 if self.mute_tracker:
-                    config = payload.get("config") or payload
+                    self.mute_tracker.update_from_payload(payload)
+                    config = payload.get("config") or {}
                     config_hash = config.get("hash") if isinstance(config, dict) else None
                     if config_hash is not None:
                         self._config_hash = str(config_hash)
-                    if op == OpCode.NOTIF_CONFIG:
+                    self._notify_mute_settings_ready()
+                    if not self._settings_has_chats(payload):
                         task = asyncio.create_task(self._refresh_mute_settings(config_hash))
                         task.add_done_callback(_log_task_exception)
-                    else:
-                        self.mute_tracker.update_from_payload(payload)
+
+            elif op == OpCode.CONFIG:
+                if self.mute_tracker and cmd not in (1, 3):
+                    self.mute_tracker.update_from_payload(payload)
+                    self._notify_mute_settings_ready()
 
             elif op == OpCode.DISPATCH:
                 self._dispatch_counter += 1
@@ -401,17 +430,12 @@ class MaxClient:
 
     async def fetch_settings(self, config_hash: str | None = None) -> dict:
         """Request per-chat notification settings (mute) via opcode 22."""
-        candidates: list[dict] = []
         h = config_hash or self._config_hash
-        if h:
-            candidates.extend([
-                {"hash": h},
-                {"config": {"hash": h}},
-            ])
-        candidates.extend([{}, {"settings": {}}])
+        if not h:
+            return {}
 
-        for payload in candidates:
-            resp = await self.cmd(OpCode.CONFIG, payload, timeout=8)
+        for payload in ({"hash": h}, {"config": {"hash": h}}):
+            resp = await self.cmd(OpCode.CONFIG, payload, timeout=5)
             if self._settings_has_chats(resp):
                 if resp.get("hash") is not None:
                     self._config_hash = str(resp["hash"])
@@ -428,6 +452,7 @@ class MaxClient:
         after = self.mute_tracker.muted_count()
         if resp or after != before:
             log.info("Mute state refreshed from CONFIG: %d muted chat(s)", after)
+        self._notify_mute_settings_ready()
 
     async def fetch_contacts(self, contact_ids: list[int]) -> dict:
         """Fetch contact info via WS opcode 32. Returns raw response payload."""

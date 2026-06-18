@@ -38,6 +38,10 @@ class MuteTracker:
         self._permanent: set[Any] = set()
         self._until: dict[Any, int] = {}
 
+    def reset(self) -> None:
+        self._permanent.clear()
+        self._until.clear()
+
     def load_from_chats(self, chats: list) -> None:
         for chat in chats:
             if isinstance(chat, dict) and chat.get("id") is not None:
@@ -47,6 +51,10 @@ class MuteTracker:
         """Load mute state from AUTH_SNAPSHOT (chats list + settings.chats map)."""
         self.load_from_chats(snapshot.get("chats", []))
         self.on_settings(snapshot)
+        for key in ("config", "userSettings"):
+            nested = snapshot.get(key)
+            if isinstance(nested, dict):
+                self.on_settings(nested)
         log.info(
             "Mute state loaded from snapshot: %d muted chat(s)",
             self.muted_count(),
@@ -63,6 +71,9 @@ class MuteTracker:
         if payload.get("id") is not None or payload.get("chatId") is not None:
             self.update_chat(payload)
             return
+        config = payload.get("config")
+        if isinstance(config, dict):
+            self.update_from_payload(config)
         if payload.get("settings") is not None or payload.get("chats") is not None:
             self.on_settings(payload)
 

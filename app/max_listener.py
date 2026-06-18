@@ -368,19 +368,25 @@ def create_max_client(
 
         if client.mute_tracker:
             client.mute_tracker.load_from_snapshot(snapshot)
-            settings_resp = await client.fetch_settings(snapshot.get("hash"))
-            if settings_resp:
-                client.mute_tracker.update_from_payload(settings_resp)
-                log.info(
-                    "Mute state after CONFIG fetch: %d muted chat(s)",
-                    client.mute_tracker.muted_count(),
-                )
-            elif client.mute_tracker.muted_count() == 0:
-                log.warning(
-                    "Mute settings not in snapshot/CONFIG (hash=%s). "
-                    "Will refresh on NOTIF_CONFIG from Max.",
-                    snapshot.get("hash"),
-                )
+            if client._settings_ready_event:
+                try:
+                    await asyncio.wait_for(client._settings_ready_event.wait(), timeout=2.5)
+                except asyncio.TimeoutError:
+                    log.info("Timed out waiting for NOTIF_CONFIG mute settings")
+            if client.mute_tracker.muted_count() == 0:
+                settings_resp = await client.fetch_settings(snapshot.get("hash"))
+                if settings_resp:
+                    client.mute_tracker.update_from_payload(settings_resp)
+                    log.info(
+                        "Mute state after CONFIG fetch: %d muted chat(s)",
+                        client.mute_tracker.muted_count(),
+                    )
+                elif client.mute_tracker.muted_count() == 0:
+                    log.warning(
+                        "Mute settings not in snapshot/CONFIG (hash=%s). "
+                        "Will refresh on NOTIF_CONFIG from Max.",
+                        snapshot.get("hash"),
+                    )
 
         if participant_ids:
             log.info("Batch-resolving %d participants...", len(participant_ids))

@@ -106,3 +106,27 @@ class TestMuteTracker:
             "dontDisturbUntil": -1,
         })
         assert mt.is_muted(-123) is True
+
+    def test_update_from_payload_nested_config(self):
+        mt = MuteTracker()
+        mt.update_from_payload({
+            "config": {
+                "settings": {
+                    "chats": {"77": {"dontDisturbUntil": -1}},
+                },
+            },
+        })
+        assert mt.is_muted(77) is True
+
+    def test_load_from_snapshot_nested_config(self):
+        mt = MuteTracker()
+        mt.load_from_snapshot({
+            "chats": [],
+            "config": {
+                "settings": {
+                    "chats": {"88": {"dontDisturbUntil": -1}},
+                },
+            },
+        })
+        assert mt.is_muted(88) is True
+        assert mt.muted_count() == 1
