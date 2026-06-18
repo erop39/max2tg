@@ -10,16 +10,22 @@ from app.max_listener import _startup_message, create_max_client
 
 class TestStartupMessage:
     def test_without_muted_count(self):
-        assert _startup_message(32) == "✅ <b>Max:</b> подключён | чатов: 32"
+        assert _startup_message(32) == "✅ <b>MAX:</b> online\n📩 чатов: 32"
 
     def test_with_muted_count(self):
         text = _startup_message(32, 7)
-        assert "чатов: 32" in text
-        assert "🔇 из них без звука: 7" in text
+        assert text == (
+            "✅ <b>MAX:</b> online\n"
+            "📩 чатов: 32 | 🔇 из них без звука: 7"
+        )
 
     def test_with_buffered_count(self):
         text = _startup_message(32, 7, 3)
-        assert "📥 в буфере: 3" in text
+        assert text == (
+            "✅ <b>MAX:</b> online\n"
+            "📩 чатов: 32 | 🔇 из них без звука: 7\n"
+            "📦 в буфере: 3"
+        )
 
 
 @pytest.fixture
@@ -104,3 +110,5 @@ class TestSkipMutedListener:
         text = sender.send.call_args[0][0]
         assert "чатов: 1" in text
         assert "🔇 из них без звука: 2" in text
+        assert "MAX:" in text
+        assert "online" in text

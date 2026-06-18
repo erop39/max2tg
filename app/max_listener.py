@@ -254,12 +254,14 @@ def _human_size(n: int) -> str:
 
 
 def _startup_message(chat_count: int, muted_count: int | None = None, buffered_count: int | None = None) -> str:
-    text = f"✅ <b>Max:</b> подключён | чатов: {chat_count}"
+    lines = ["✅ <b>MAX:</b> online"]
+    stats = f"📩 чатов: {chat_count}"
     if muted_count is not None:
-        text += f" | 🔇 из них без звука: {muted_count}"
+        stats += f" | 🔇 из них без звука: {muted_count}"
+    lines.append(stats)
     if buffered_count:
-        text += f" | 📥 в буфере: {buffered_count}"
-    return text
+        lines.append(f"📦 в буфере: {buffered_count}")
+    return "\n".join(lines)
 
 
 async def forward_message(
