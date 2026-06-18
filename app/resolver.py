@@ -102,6 +102,19 @@ class ContactResolver:
         )
         return list(all_participant_ids)
 
+    def refresh_dm_chat_names(self) -> None:
+        """Replace DM:peer_id placeholders with resolved contact names."""
+        for chat_id, label in list(self.chats.items()):
+            if not label.startswith("DM:"):
+                continue
+            try:
+                peer_id = int(label[3:])
+            except ValueError:
+                continue
+            name = self.users.get(peer_id)
+            if name:
+                self.chats[chat_id] = name
+
     # ── WebSocket contact fetch ────────────────────────────────────
 
     async def _ws_fetch_contacts(self, user_ids: list) -> None:

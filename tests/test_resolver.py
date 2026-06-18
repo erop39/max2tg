@@ -137,6 +137,17 @@ class TestLoadSnapshot:
         resolver.load_snapshot(snapshot)
         assert resolver.chats[99] == "DM:55"
 
+    def test_refresh_dm_chat_names_replaces_placeholder(self):
+        resolver = self._make_resolver()
+        snapshot = {
+            "profile": {"id": 1},
+            "chats": [{"id": 99, "type": "DIALOG", "participants": {"1": {}, "55": {}}}],
+        }
+        resolver.load_snapshot(snapshot)
+        resolver.users[55] = "Аня"
+        resolver.refresh_dm_chat_names()
+        assert resolver.chats[99] == "Аня"
+
     def test_dm_with_explicit_title_keeps_title(self):
         resolver = self._make_resolver()
         snapshot = {

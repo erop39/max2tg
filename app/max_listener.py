@@ -253,6 +253,15 @@ def _human_size(n: int) -> str:
     return f"{n:.1f} ТБ"
 
 
+def _startup_message(chat_count: int, muted_count: int | None = None, buffered_count: int | None = None) -> str:
+    text = f"✅ <b>Max:</b> подключён | чатов: {chat_count}"
+    if muted_count is not None:
+        text += f" | 🔇 из них без звука: {muted_count}"
+    if buffered_count:
+        text += f" | 📥 в буфере: {buffered_count}"
+    return text
+
+
 async def forward_message(
     msg: MaxMessage,
     client: MaxClient,
@@ -356,12 +365,25 @@ def create_max_client(
             log.info("Unread-only mode: read marks loaded from snapshot")
 
         if client.mute_tracker:
-            client.mute_tracker.load_from_chats(snapshot.get("chats", []))
-            log.info("Skip-muted mode: mute state loaded from snapshot")
+            client.mute_tracker.load_from_snapshot(snapshot)
+            settings_resp = await client.fetch_settings(snapshot.get("hash"))
+            if settings_resp:
+                client.mute_tracker.update_from_payload(settings_resp)
+                log.info(
+                    "Mute state after CONFIG fetch: %d muted chat(s)",
+                    client.mute_tracker.muted_count(),
+                )
+            elif client.mute_tracker.muted_count() == 0:
+                log.warning(
+                    "Mute settings not in snapshot/CONFIG (hash=%s). "
+                    "Will refresh on NOTIF_CONFIG from Max.",
+                    snapshot.get("hash"),
+                )
 
         if participant_ids:
             log.info("Batch-resolving %d participants...", len(participant_ids))
             await resolver.resolve_users_batch(participant_ids)
+            resolver.refresh_dm_chat_names()
             log.info("Resolved users: %s", resolver.users)
 
             log.info("Known chats: %s", resolver.chats)
@@ -380,7 +402,16 @@ def create_max_client(
             await sender.send("✅ <b>Max:</b> соединение восстановлено", reply_markup=status_kb)
         else:
             chat_count = len(resolver.chats)
-            await sender.send(f"✅ <b>Max:</b> подключён | чатов: {chat_count}", reply_markup=status_kb)
+            muted_count = None
+            buffered_count = None
+            if client.skip_muted and client.mute_tracker:
+                muted_count = client.mute_tracker.muted_count()
+            if muted_digest_enabled and muted_buffer:
+                buffered_count = await muted_buffer.count()
+            await sender.send(
+                _startup_message(chat_count, muted_count, buffered_count),
+                reply_markup=status_kb,
+            )
         _first_connect = False
 
     @client.on_disconnect

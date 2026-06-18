@@ -43,8 +43,34 @@ class MuteTracker:
             if isinstance(chat, dict) and chat.get("id") is not None:
                 self.update_chat(chat)
 
+    def load_from_snapshot(self, snapshot: dict) -> None:
+        """Load mute state from AUTH_SNAPSHOT (chats list + settings.chats map)."""
+        self.load_from_chats(snapshot.get("chats", []))
+        self.on_settings(snapshot)
+        log.info(
+            "Mute state loaded from snapshot: %d muted chat(s)",
+            self.muted_count(),
+        )
+
+    def update_from_payload(self, payload: dict) -> None:
+        """Apply mute updates from NOTIF_CHAT / NOTIF_CONFIG payloads."""
+        if not isinstance(payload, dict):
+            return
+        chat = payload.get("chat")
+        if isinstance(chat, dict):
+            self.update_chat(chat)
+            return
+        if payload.get("id") is not None or payload.get("chatId") is not None:
+            self.update_chat(payload)
+            return
+        if payload.get("settings") is not None or payload.get("chats") is not None:
+            self.on_settings(payload)
+
+    def muted_count(self) -> int:
+        return len(self._permanent)
+
     def update_chat(self, chat: dict) -> None:
-        chat_id = _normalize_chat_id(chat.get("id"))
+        chat_id = _normalize_chat_id(chat.get("id") or chat.get("chatId"))
         if chat_id is None:
             return
         ddu = _extract_dont_disturb_until(chat)
@@ -70,20 +96,20 @@ class MuteTracker:
         if dont_disturb_until == 0:
             self._permanent.discard(chat_id)
             self._until.pop(chat_id, None)
-            log.debug("Chat unmuted: %s", chat_id)
+            log.info("Chat unmuted: %s", chat_id)
             return
 
         if dont_disturb_until == -1:
             self._permanent.add(chat_id)
             self._until.pop(chat_id, None)
-            log.debug("Chat muted permanently: %s", chat_id)
+            log.info("Chat muted permanently: %s", chat_id)
             return
 
         now_ms = int(time.time() * 1000)
         if dont_disturb_until > now_ms:
             self._permanent.add(chat_id)
             self._until[chat_id] = dont_disturb_until
-            log.debug("Chat muted until %s: %s", dont_disturb_until, chat_id)
+            log.info("Chat muted until %s: %s", dont_disturb_until, chat_id)
         else:
             self._permanent.discard(chat_id)
             self._until.pop(chat_id, None)
