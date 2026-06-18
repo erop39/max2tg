@@ -175,11 +175,14 @@ class TestReconnectNotification:
     async def test_notification_sent_on_reconnect(self):
         client, sender = _make_client()
         snapshot = {"profile": {"id": 1, "names": []}, "chats": []}
-        # First connect
-        await client._on_ready_cb(snapshot)
-        # Reconnect
-        sender.send.reset_mock()
-        await client._on_ready_cb(snapshot)
+        t0 = datetime(2026, 1, 1, 12, 0, 0)
+        t1 = datetime(2026, 1, 1, 12, 1, 1)
+        with patch("app.max_listener.datetime") as mock_dt:
+            mock_dt.now.return_value = t0
+            await client._on_ready_cb(snapshot)
+            mock_dt.now.return_value = t1
+            sender.send.reset_mock()
+            await client._on_ready_cb(snapshot)
         sender.send.assert_called_once()
         assert "online" in sender.send.call_args[0][0]
         assert "чатов:" in sender.send.call_args[0][0]

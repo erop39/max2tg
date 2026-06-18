@@ -345,6 +345,7 @@ def create_max_client(
     _first_connect = True
     _notif_count = 0
     _last_notif_time: datetime | None = None
+    _last_status_time: datetime | None = None
 
     def _can_notify() -> bool:
         if _last_notif_time is None:
@@ -356,9 +357,27 @@ def create_max_client(
             return elapsed >= 10800   # 3-е: через 3 часа
         return elapsed >= 86400       # 4-е и далее: раз в сутки
 
+    def _can_send_status(is_reconnect: bool) -> bool:
+        nonlocal _last_status_time
+        if not is_reconnect:
+            return True
+        if _last_status_time is None:
+            return True
+        return (datetime.now() - _last_status_time).total_seconds() >= 60
+
+    async def _resolve_participants(participant_ids: list) -> None:
+        if not participant_ids:
+            return
+        log.info("Batch-resolving %d participants...", len(participant_ids))
+        await resolver.resolve_users_batch(participant_ids)
+        resolver.refresh_dm_chat_names()
+        log.info("Resolved users: %s", resolver.users)
+        log.info("Known chats: %s", resolver.chats)
+
     @client.on_ready
     async def handle_ready(snapshot: dict):
-        nonlocal _first_connect
+        nonlocal _first_connect, _last_status_time
+        is_reconnect = not _first_connect
         participant_ids = resolver.load_snapshot(snapshot)
 
         if client.read_tracker:
@@ -370,7 +389,7 @@ def create_max_client(
             client.mute_tracker.load_from_snapshot(snapshot)
             if client._settings_ready_event:
                 try:
-                    await asyncio.wait_for(client._settings_ready_event.wait(), timeout=2.5)
+                    await asyncio.wait_for(client._settings_ready_event.wait(), timeout=5.0)
                 except asyncio.TimeoutError:
                     log.info("Timed out waiting for NOTIF_CONFIG mute settings")
             if client.mute_tracker.muted_count() == 0:
@@ -388,36 +407,40 @@ def create_max_client(
                         snapshot.get("hash"),
                     )
 
-        if participant_ids:
-            log.info("Batch-resolving %d participants...", len(participant_ids))
-            await resolver.resolve_users_batch(participant_ids)
-            resolver.refresh_dm_chat_names()
-            log.info("Resolved users: %s", resolver.users)
-
-            log.info("Known chats: %s", resolver.chats)
-            log.info("Known users: %s", resolver.users)
-
         await hooks.emit(
             HookEvent.ON_READY,
             snapshot=snapshot,
             resolver=resolver,
             client=client,
-            is_reconnect=not _first_connect,
+            is_reconnect=is_reconnect,
         )
 
         status_kb = muted_digest_keyboard() if muted_digest_enabled else None
-        chat_count = len(resolver.chats)
-        muted_count = None
-        buffered_count = None
-        if client.skip_muted and client.mute_tracker:
-            muted_count = client.mute_tracker.muted_count()
-        if muted_digest_enabled and muted_buffer:
-            buffered_count = await muted_buffer.count()
-        await sender.send(
-            _startup_message(chat_count, muted_count, buffered_count),
-            reply_markup=status_kb,
-        )
+        if _can_send_status(is_reconnect):
+            chat_count = len(resolver.chats)
+            muted_count = None
+            buffered_count = None
+            if client.skip_muted and client.mute_tracker:
+                muted_count = client.mute_tracker.muted_count()
+            if muted_digest_enabled and muted_buffer:
+                buffered_count = await muted_buffer.count()
+            await sender.send(
+                _startup_message(chat_count, muted_count, buffered_count),
+                reply_markup=status_kb,
+            )
+            _last_status_time = datetime.now()
+        else:
+            log.info("Startup status suppressed (reconnect throttle)")
+
         _first_connect = False
+
+        async def _safe_resolve() -> None:
+            try:
+                await _resolve_participants(participant_ids)
+            except Exception:
+                log.exception("Participant resolve failed")
+
+        asyncio.create_task(_safe_resolve())
 
     @client.on_disconnect
     async def handle_disconnect():

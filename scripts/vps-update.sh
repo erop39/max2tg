@@ -31,5 +31,5 @@ sudo systemctl restart "$SERVICE"
 sleep 2
 sudo systemctl status "$SERVICE" --no-pager -l | head -20
 
-echo "==> Recent logs (look for 'max2tg version:'):"
-journalctl -u "$SERVICE" -n 15 --no-pager || true
+echo "==> Running deploy verification..."
+bash "$APP_DIR/scripts/verify-deploy.sh" || true
