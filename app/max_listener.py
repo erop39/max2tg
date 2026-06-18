@@ -406,20 +406,17 @@ def create_max_client(
         )
 
         status_kb = muted_digest_keyboard() if muted_digest_enabled else None
-        if not _first_connect:
-            await sender.send("✅ <b>Max:</b> соединение восстановлено", reply_markup=status_kb)
-        else:
-            chat_count = len(resolver.chats)
-            muted_count = None
-            buffered_count = None
-            if client.skip_muted and client.mute_tracker:
-                muted_count = client.mute_tracker.muted_count()
-            if muted_digest_enabled and muted_buffer:
-                buffered_count = await muted_buffer.count()
-            await sender.send(
-                _startup_message(chat_count, muted_count, buffered_count),
-                reply_markup=status_kb,
-            )
+        chat_count = len(resolver.chats)
+        muted_count = None
+        buffered_count = None
+        if client.skip_muted and client.mute_tracker:
+            muted_count = client.mute_tracker.muted_count()
+        if muted_digest_enabled and muted_buffer:
+            buffered_count = await muted_buffer.count()
+        await sender.send(
+            _startup_message(chat_count, muted_count, buffered_count),
+            reply_markup=status_kb,
+        )
         _first_connect = False
 
     @client.on_disconnect

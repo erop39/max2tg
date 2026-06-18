@@ -181,4 +181,5 @@ class TestReconnectNotification:
         sender.send.reset_mock()
         await client._on_ready_cb(snapshot)
         sender.send.assert_called_once()
-        assert "восстановлено" in sender.send.call_args[0][0]
+        assert "online" in sender.send.call_args[0][0]
+        assert "чатов:" in sender.send.call_args[0][0]
