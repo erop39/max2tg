@@ -65,3 +65,49 @@ class TestMuteTracker:
         mt.update_chat({"id": 5, "dontDisturbUntil": -1})
         mt.update_chat({"id": 5, "dontDisturbUntil": 0})
         assert mt.is_muted(5) is False
+
+    def test_load_from_snapshot_settings_chats(self):
+        mt = MuteTracker()
+        mt.load_from_snapshot({
+            "chats": [
+                {"id": 10, "title": "Visible"},
+            ],
+            "settings": {
+                "chats": {
+                    "-68093732121255": {"dontDisturbUntil": -1},
+                    "10": {"dontDisturbUntil": 0},
+                }
+            },
+        })
+        assert mt.is_muted(-68093732121255) is True
+        assert mt.is_muted(10) is False
+
+    def test_update_from_payload_nested_chat(self):
+        mt = MuteTracker()
+        mt.update_from_payload({
+            "chat": {"id": 99, "dontDisturbUntil": -1},
+        })
+        assert mt.is_muted(99) is True
+
+    def test_update_from_payload_settings(self):
+        mt = MuteTracker()
+        mt.update_from_payload({
+            "settings": {
+                "chats": {"42": {"dontDisturbUntil": -1}},
+            },
+        })
+        assert mt.is_muted(42) is True
+
+    def test_update_from_payload_chat_id_top_level(self):
+        mt = MuteTracker()
+        mt.update_from_payload({
+            "chatId": -123,
+            "dontDisturbUntil": -1,
+        })
+        assert mt.is_muted(-123) is True
+
+    def test_muted_count(self):
+        mt = MuteTracker()
+        assert mt.muted_count() == 0
+        mt.update_chat({"id": 1, "dontDisturbUntil": -1})
+        assert mt.muted_count() == 1

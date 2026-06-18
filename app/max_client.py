@@ -315,7 +315,11 @@ class MaxClient:
                 await self._send(
                     OpCode.AUTH_SNAPSHOT,
                     {
-                        "chatsCount": 10,
+                        "chatsCount": 40,
+                        "chatsSync": 0,
+                        "contactsSync": 0,
+                        "presenceSync": 0,
+                        "draftsSync": 0,
                         "interactive": True,
                         "token": self.token,
                     },
@@ -338,13 +342,11 @@ class MaxClient:
 
             elif op == OpCode.NOTIF_CHAT:
                 if self.mute_tracker:
-                    chat = payload.get("chat")
-                    if isinstance(chat, dict):
-                        self.mute_tracker.update_chat(chat)
+                    self.mute_tracker.update_from_payload(payload)
 
             elif op in (OpCode.NOTIF_CONFIG, OpCode.CONFIG):
                 if self.mute_tracker:
-                    self.mute_tracker.on_settings(payload)
+                    self.mute_tracker.update_from_payload(payload)
 
             elif op == OpCode.DISPATCH:
                 self._dispatch_counter += 1
