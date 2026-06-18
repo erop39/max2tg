@@ -93,6 +93,9 @@ async def main():
         debug=settings.debug, reply_enabled=settings.reply_enabled,
         unread_only=settings.unread_only, unread_delay_sec=settings.unread_delay_sec,
         skip_muted=settings.skip_muted,
+        tg_format_style=settings.tg_format_style,
+        tg_format_separator=settings.tg_format_separator,
+        tg_format_timestamp=settings.tg_format_timestamp,
     )
 
     if settings.unread_only:
@@ -102,6 +105,12 @@ async def main():
         )
     if settings.skip_muted:
         log.info("Skip-muted mode: ON (no forwards from muted Max chats)")
+    log.info(
+        "Message format: style=%s separator=%s timestamp=%s",
+        settings.tg_format_style,
+        settings.tg_format_separator,
+        settings.tg_format_timestamp,
+    )
 
     tg_app = None
     if settings.reply_enabled:
