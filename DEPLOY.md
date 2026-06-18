@@ -95,6 +95,10 @@ sudo systemctl restart max2tg
 ```
 
 > **Важно:** не используйте `git pull` — при расхождении веток он падает и код **не обновляется**.
+>
+> **Git от root:** если видите `dubious ownership in repository` — не запускайте `git` от root.
+> Используйте `sudo -u max2tg git ...` (как выше) или скрипт `vps-update.sh`.
+>
 > Проверка после обновления:
 > ```bash
 > grep "MAX: online" /opt/max2tg/app/max_listener.py
