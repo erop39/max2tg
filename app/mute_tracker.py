@@ -43,8 +43,37 @@ class MuteTracker:
             if isinstance(chat, dict) and chat.get("id") is not None:
                 self.update_chat(chat)
 
+    def load_from_snapshot(self, snapshot: dict) -> None:
+        """Load mute state from AUTH_SNAPSHOT (chats list + settings/config maps)."""
+        self.load_from_chats(snapshot.get("chats", []))
+        self.on_settings(snapshot)
+        config = snapshot.get("config")
+        if isinstance(config, dict):
+            self.on_settings(config)
+        log.info(
+            "Mute state loaded from snapshot: %d muted chat(s)",
+            len(self._permanent),
+        )
+
+    def muted_count(self) -> int:
+        return len(self._permanent)
+
+    def update_from_payload(self, payload: dict) -> None:
+        """Apply mute updates from NOTIF_CHAT / NOTIF_CONFIG payloads."""
+        if not isinstance(payload, dict):
+            return
+        chat = payload.get("chat")
+        if isinstance(chat, dict):
+            self.update_chat(chat)
+            return
+        if payload.get("id") is not None or payload.get("chatId") is not None:
+            self.update_chat(payload)
+            return
+        if payload.get("settings") is not None or payload.get("chats") is not None:
+            self.on_settings(payload)
+
     def update_chat(self, chat: dict) -> None:
-        chat_id = _normalize_chat_id(chat.get("id"))
+        chat_id = _normalize_chat_id(chat.get("id") or chat.get("chatId"))
         if chat_id is None:
             return
         ddu = _extract_dont_disturb_until(chat)

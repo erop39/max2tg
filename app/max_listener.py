@@ -252,6 +252,13 @@ def _human_size(n: int) -> str:
     return f"{n:.1f} ТБ"
 
 
+def _startup_message(chat_count: int, muted_count: int | None = None) -> str:
+    text = f"✅ <b>Max:</b> подключён | чатов: {chat_count}"
+    if muted_count is not None:
+        text += f" | 🔇 из них без звука: {muted_count}"
+    return text
+
+
 def create_max_client(
     max_token: str, max_device_id: str, sender: TelegramSender, max_chat_ids: str | None = None,
     debug: bool = False, reply_enabled: bool = False,
@@ -288,8 +295,7 @@ def create_max_client(
             log.info("Unread-only mode: read marks loaded from snapshot")
 
         if client.mute_tracker:
-            client.mute_tracker.load_from_chats(snapshot.get("chats", []))
-            log.info("Skip-muted mode: mute state loaded from snapshot")
+            client.mute_tracker.load_from_snapshot(snapshot)
 
         if participant_ids:
             log.info("Batch-resolving %d participants...", len(participant_ids))
@@ -311,7 +317,10 @@ def create_max_client(
             await sender.send("✅ <b>Max:</b> соединение восстановлено")
         else:
             chat_count = len(resolver.chats)
-            await sender.send(f"✅ <b>Max:</b> подключён | чатов: {chat_count}")
+            muted_count = None
+            if client.skip_muted and client.mute_tracker:
+                muted_count = client.mute_tracker.muted_count()
+            await sender.send(_startup_message(chat_count, muted_count))
         _first_connect = False
 
     @client.on_disconnect
