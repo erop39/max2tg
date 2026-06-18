@@ -15,6 +15,7 @@ from app.muted_buffer import MutedMessageBuffer
 from app.plugins import load_plugins
 from app.tg_handler import build_tg_app
 from app.tg_sender import TelegramSender
+from app.version import git_revision
 
 threading.stack_size(524288)
 
@@ -69,6 +70,7 @@ async def main():
     logging.getLogger("telegram").setLevel(logging.WARNING if not settings.debug else logging.DEBUG)
 
     log.info("Debug mode: %s", "ON" if settings.debug else "OFF")
+    log.info("max2tg version: %s", git_revision())
 
     if settings.plugins_enabled:
         loaded = load_plugins(hooks)

@@ -88,12 +88,20 @@ sudo bash /opt/max2tg/scripts/vps-update.sh
 
 ```bash
 cd /opt/max2tg
-sudo -u max2tg git pull origin main
+sudo -u max2tg git fetch origin main
+sudo -u max2tg git reset --hard origin/main   # .env не затрагивается
 sudo -u max2tg .venv/bin/pip install -r requirements.txt -q
 sudo systemctl restart max2tg
 ```
 
-Файл `.env` при `git pull` **не меняется**.
+> **Важно:** не используйте `git pull` — при расхождении веток он падает и код **не обновляется**.
+> Проверка после обновления:
+> ```bash
+> grep "MAX: online" /opt/max2tg/app/max_listener.py
+> journalctl -u max2tg -n 20 | grep "max2tg version"
+> ```
+
+Файл `.env` при обновлении **не меняется**.
 
 ---
 
