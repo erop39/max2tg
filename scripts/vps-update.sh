@@ -18,7 +18,7 @@ echo "==> Current revision:"
 sudo -u "$GIT_USER" git rev-parse --short HEAD
 
 echo "==> Checking startup message format in code..."
-grep -q "MAX: online" app/max_listener.py || {
+grep -q '_startup_message' app/max_listener.py && grep -q 'MAX:</b> online' app/max_listener.py || {
   echo "ERROR: app/max_listener.py does not contain new startup format." >&2
   exit 1
 }

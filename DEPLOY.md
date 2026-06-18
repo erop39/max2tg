@@ -101,7 +101,7 @@ sudo systemctl restart max2tg
 >
 > Проверка после обновления:
 > ```bash
-> grep "MAX: online" /opt/max2tg/app/max_listener.py
+> grep "MAX:</b> online" /opt/max2tg/app/max_listener.py
 > journalctl -u max2tg -n 20 | grep "max2tg version"
 > ```
 
