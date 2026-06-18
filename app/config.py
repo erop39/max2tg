@@ -1,7 +1,12 @@
+import logging
 import os
 from dataclasses import dataclass
 
 from dotenv import load_dotenv
+
+log = logging.getLogger(__name__)
+
+VALID_TG_FORMAT_STYLES = frozenset({"plain", "enhanced", "compact"})
 
 
 @dataclass(frozen=True)
@@ -21,6 +26,9 @@ class Settings:
     unread_only: bool = False
     unread_delay_sec: float = 2.0
     skip_muted: bool = False
+    tg_format_style: str = "enhanced"
+    tg_format_separator: bool = True
+    tg_format_timestamp: bool = True
 
 
 def load_settings() -> Settings:
@@ -42,6 +50,14 @@ def load_settings() -> Settings:
             f"TG_CHAT_ID must be a valid integer, got: {tg_chat_id!r}"
         )
 
+    raw_format_style = os.environ.get("TG_FORMAT_STYLE", "enhanced").strip().lower()
+    if raw_format_style not in VALID_TG_FORMAT_STYLES:
+        log.warning(
+            "Unknown TG_FORMAT_STYLE=%r, falling back to 'enhanced'",
+            raw_format_style,
+        )
+        raw_format_style = "enhanced"
+
     return Settings(
         max_token=os.environ["MAX_TOKEN"].strip(),
         max_device_id=os.environ["MAX_DEVICE_ID"].strip(),
@@ -58,4 +74,9 @@ def load_settings() -> Settings:
         unread_only=os.environ.get("UNREAD_ONLY", "").lower() in ("1", "true", "yes"),
         unread_delay_sec=float(os.environ.get("UNREAD_DELAY_SEC", "2") or "2"),
         skip_muted=os.environ.get("SKIP_MUTED", "").lower() in ("1", "true", "yes"),
+        tg_format_style=raw_format_style,
+        tg_format_separator=os.environ.get("TG_FORMAT_SEPARATOR", "true").lower()
+        not in ("0", "false", "no"),
+        tg_format_timestamp=os.environ.get("TG_FORMAT_TIMESTAMP", "true").lower()
+        not in ("0", "false", "no"),
     )

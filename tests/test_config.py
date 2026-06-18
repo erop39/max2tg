@@ -142,6 +142,28 @@ class TestLoadSettingsValid:
         s = _load_settings_with_env(_env(MAX_CHAT_IDS=""))
         assert s.max_chat_ids is None
 
+    def test_tg_format_defaults(self):
+        s = _load_settings_with_env(_env())
+        assert s.tg_format_style == "enhanced"
+        assert s.tg_format_separator is True
+        assert s.tg_format_timestamp is True
+
+    def test_tg_format_style_plain(self):
+        s = _load_settings_with_env(_env(TG_FORMAT_STYLE="plain"))
+        assert s.tg_format_style == "plain"
+
+    def test_tg_format_style_invalid_falls_back(self):
+        s = _load_settings_with_env(_env(TG_FORMAT_STYLE="unknown"))
+        assert s.tg_format_style == "enhanced"
+
+    def test_tg_format_separator_false(self):
+        s = _load_settings_with_env(_env(TG_FORMAT_SEPARATOR="false"))
+        assert s.tg_format_separator is False
+
+    def test_tg_format_timestamp_false(self):
+        s = _load_settings_with_env(_env(TG_FORMAT_TIMESTAMP="0"))
+        assert s.tg_format_timestamp is False
+
 
 # ---------------------------------------------------------------------------
 # load_settings — missing required variables

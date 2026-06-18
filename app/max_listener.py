@@ -13,14 +13,160 @@ log = logging.getLogger(__name__)
 
 PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+SEPARATOR_LINE = "━━━━━━━━━━━━━━━━"
 
 
-def _header(msg: MaxMessage, sender_label: str, chat_label: str, is_dm: bool) -> str:
+def _format_time(timestamp: Any) -> str:
+    if timestamp is None:
+        return ""
+    try:
+        ts = int(timestamp)
+    except (TypeError, ValueError):
+        return ""
+    if ts > 1_000_000_000_000:
+        ts //= 1000
+    try:
+        return datetime.fromtimestamp(ts).strftime("%H:%M")
+    except (OSError, OverflowError, ValueError):
+        return ""
+
+
+def _needs_separator(
+    last_key: tuple | None,
+    chat_id: Any,
+    sender_id: Any,
+    separator_enabled: bool,
+) -> bool:
+    if not separator_enabled or last_key is None:
+        return False
+    return last_key != (chat_id, sender_id)
+
+
+def _header_plain(sender_label: str, chat_label: str, is_dm: bool) -> str:
     if is_dm:
         return f"✉ <b>{sender_label}</b>"
     if chat_label:
         return f"💬 <b>{chat_label}</b> | {sender_label}"
     return f"💬 <b>{sender_label}</b>"
+
+
+def _build_header(
+    sender_label: str,
+    chat_label: str,
+    is_dm: bool,
+    style: str,
+    timestamp: Any,
+    show_timestamp: bool,
+) -> str:
+    if style == "plain":
+        return _header_plain(sender_label, chat_label, is_dm)
+
+    time_suffix = ""
+    if show_timestamp:
+        time_str = _format_time(timestamp)
+        if time_str:
+            time_suffix = f" · {time_str}"
+
+    if is_dm:
+        return f"✉ <b>{sender_label}</b>{time_suffix}"
+    if chat_label:
+        return f"💬 <b>{chat_label}</b>\n👤 <b>{sender_label}</b>{time_suffix}"
+    return f"💬 <b>{sender_label}</b>{time_suffix}"
+
+
+def _format_body_text(text: str, style: str, *, use_blockquote: bool = True) -> str:
+    if not text:
+        return ""
+    escaped = escape(text)
+    if style == "plain" or not use_blockquote:
+        return escaped
+    return f"<blockquote>{escaped}</blockquote>"
+
+
+def _join_header_body(header: str, body: str, *, gap: str = "\n\n") -> str:
+    if header and body:
+        return f"{header}{gap}{body}"
+    return header or body
+
+
+class MessageFormatter:
+    def __init__(
+        self,
+        style: str = "enhanced",
+        separator_enabled: bool = True,
+        show_timestamp: bool = True,
+    ) -> None:
+        self.style = style
+        self.separator_enabled = separator_enabled
+        self.show_timestamp = show_timestamp
+        self.last_sender_key: tuple | None = None
+
+    def begin_message(
+        self,
+        chat_id: Any,
+        sender_id: Any,
+        sender_label: str,
+        chat_label: str,
+        is_dm: bool,
+        timestamp: Any,
+    ) -> str:
+        sender_key = (chat_id, sender_id)
+        same_sender = self.last_sender_key == sender_key
+        need_sep = _needs_separator(
+            self.last_sender_key,
+            chat_id,
+            sender_id,
+            self.separator_enabled and self.style != "plain",
+        )
+        self.last_sender_key = sender_key
+
+        parts: list[str] = []
+        if need_sep:
+            parts.append(SEPARATOR_LINE)
+
+        show_header = self.style == "plain" or self.style == "enhanced" or not same_sender
+        if show_header:
+            header_style = "enhanced" if self.style == "compact" else self.style
+            parts.append(
+                _build_header(
+                    sender_label,
+                    chat_label,
+                    is_dm,
+                    header_style,
+                    timestamp,
+                    self.show_timestamp,
+                )
+            )
+
+        if self.style == "plain":
+            return "\n".join(parts)
+        return "\n\n".join(parts)
+
+    def format_content(self, text: str, *, use_blockquote: bool = True) -> str:
+        return _format_body_text(text, self.style, use_blockquote=use_blockquote)
+
+    def join_header_body(self, header: str, body: str) -> str:
+        gap = "\n" if self.style == "plain" else "\n\n"
+        return _join_header_body(header, body, gap=gap)
+
+    def format_text_message(
+        self,
+        chat_id: Any,
+        sender_id: Any,
+        sender_label: str,
+        chat_label: str,
+        is_dm: bool,
+        text: str,
+        timestamp: Any,
+    ) -> str:
+        header = self.begin_message(
+            chat_id, sender_id, sender_label, chat_label, is_dm, timestamp
+        )
+        return self.join_header_body(header, self.format_content(text))
+
+
+def _header(msg: MaxMessage, sender_label: str, chat_label: str, is_dm: bool) -> str:
+    return _header_plain(sender_label, chat_label, is_dm)
 
 
 def _extract_photo_url(attach: dict) -> str | None:
@@ -181,6 +327,7 @@ async def _handle_forward_message(
     sender: TelegramSender,
     resolver: ContactResolver,
     kb=None,
+    formatter: MessageFormatter | None = None,
 ) -> None:
     """Handle FORWARD link inside a message."""
     fwd_meaningful, fwd_sender_label, fwd_text = await _parse_link(link, resolver)
@@ -189,21 +336,25 @@ async def _handle_forward_message(
     if fwd_sender_label:
         prefix = f"↩️ <b>Переслано от {fwd_sender_label}</b>"
 
-    full_header = f"{header_text}\n{prefix}"
+    full_header = f"{header_text}\n{prefix}" if header_text else prefix
+    join = formatter.join_header_body if formatter else lambda h, b: _join_header_body(h, b, gap="\n")
     if fwd_meaningful:
         text_sent = False
         for i, attach in enumerate(fwd_meaningful):
             if i == 0 and fwd_text:
-                cap = f"{full_header}\n{escape(fwd_text)}"
+                body = formatter.format_content(fwd_text) if formatter else escape(fwd_text)
+                cap = join(full_header, body)
                 text_sent = True
             else:
                 cap = full_header
             await _send_attach(attach, client, sender, cap, None, None, kb=kb)
 
         if fwd_text and not text_sent:
-            await sender.send(f"{full_header}\n{escape(fwd_text)}", reply_markup=kb)
+            body = formatter.format_content(fwd_text) if formatter else escape(fwd_text)
+            await sender.send(join(full_header, body), reply_markup=kb)
     elif fwd_text:
-        await sender.send(f"{full_header}\n{escape(fwd_text)}", reply_markup=kb)
+        body = formatter.format_content(fwd_text) if formatter else escape(fwd_text)
+        await sender.send(join(full_header, body), reply_markup=kb)
     else:
         await sender.send(f"{full_header}\n<i>[без содержимого]</i>", reply_markup=kb)
 
@@ -219,7 +370,7 @@ async def _handle_reply_message(
     if fwd_sender_label:
         prefix = f"↩ <b>Ответ на {fwd_sender_label}</b>"
 
-    full_header = f"{header_text}\n{prefix}"
+    full_header = f"{header_text}\n{prefix}" if header_text else prefix
     attaches_str = ""
     if fwd_meaningful:
         for fwd_attach in fwd_meaningful:
@@ -256,12 +407,20 @@ def create_max_client(
     max_token: str, max_device_id: str, sender: TelegramSender, max_chat_ids: str | None = None,
     debug: bool = False, reply_enabled: bool = False,
     unread_only: bool = False, unread_delay_sec: float = 2.0, skip_muted: bool = False,
+    tg_format_style: str = "enhanced",
+    tg_format_separator: bool = True,
+    tg_format_timestamp: bool = True,
 ) -> MaxClient:
     client = MaxClient(
         token=max_token, device_id=max_device_id, debug=debug, chat_ids=max_chat_ids,
         unread_only=unread_only, skip_muted=skip_muted,
     )
     resolver = ContactResolver(client=client)
+    formatter = MessageFormatter(
+        style=tg_format_style,
+        separator_enabled=tg_format_separator,
+        show_timestamp=tg_format_timestamp,
+    )
 
     _first_connect = True
     _notif_count = 0
@@ -371,16 +530,21 @@ def create_max_client(
             chat_label = ""
         else:
             chat_label = escape(resolver.chat_name(msg.chat_id))
-        header_text = _header(msg, sender_label, chat_label, is_dm)
+        header_text = formatter.begin_message(
+            msg.chat_id, msg.sender_id, sender_label, chat_label, is_dm, msg.timestamp
+        )
         kb = reply_keyboard(msg.chat_id) if reply_enabled else None
 
         link = msg.link
         link_type = link.get("type") if isinstance(link, dict) else None
 
         if link_type == "FORWARD":
-            await _handle_forward_message(link, header_text, client, sender, resolver, kb=kb)
+            await _handle_forward_message(link, header_text, client, sender, resolver, kb=kb, formatter=formatter)
             if msg.text:
-                await sender.send(f"{header_text}\n{escape(msg.text)}", reply_markup=kb)
+                await sender.send(
+                    formatter.join_header_body(header_text, formatter.format_content(msg.text)),
+                    reply_markup=kb,
+                )
             log.info("Forwarded message → TG")
             await _message_sent()
             return
@@ -388,7 +552,11 @@ def create_max_client(
         if link_type == "REPLY":
             attaches_str, full_header, fwd_text = await _handle_reply_message(link, header_text, resolver)
             if msg.text:
-                await sender.send(f"{full_header}\n<blockquote>{escape(fwd_text)}{attaches_str}</blockquote>{escape(msg.text)}", reply_markup=kb)
+                reply_body = formatter.format_content(msg.text, use_blockquote=False)
+                await sender.send(
+                    f"{full_header}\n<blockquote>{escape(fwd_text)}{attaches_str}</blockquote>{reply_body}",
+                    reply_markup=kb,
+                )
             log.info("Forwarded reply → TG")
             await _message_sent()
             return
@@ -402,7 +570,7 @@ def create_max_client(
             text_sent = False
             for i, attach in enumerate(meaningful_attaches):
                 if i == 0 and msg.text:
-                    cap = f"{header_text}\n{escape(msg.text)}"
+                    cap = formatter.join_header_body(header_text, formatter.format_content(msg.text))
                     text_sent = True
                 else:
                     cap = header_text
@@ -410,11 +578,17 @@ def create_max_client(
                 log.info("Forwarded attach _type=%s → TG", attach.get("_type"))
 
             if msg.text and not text_sent:
-                await sender.send(f"{header_text}\n{escape(msg.text)}", reply_markup=kb)
+                await sender.send(
+                    formatter.join_header_body(header_text, formatter.format_content(msg.text)),
+                    reply_markup=kb,
+                )
             await _message_sent()
         else:
             if msg.text:
-                await sender.send(f"{header_text}\n{escape(msg.text)}", reply_markup=kb)
+                await sender.send(
+                    formatter.join_header_body(header_text, formatter.format_content(msg.text)),
+                    reply_markup=kb,
+                )
                 log.info("Forwarded text → TG")
                 await _message_sent()
             else:

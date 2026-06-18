@@ -1,7 +1,19 @@
 """Tests for app/max_listener.py — pure helper functions."""
 
+from datetime import datetime, timezone
+
 import pytest
-from app.max_listener import _human_size, _guess_media_kind
+from app.max_listener import (
+    SEPARATOR_LINE,
+    MessageFormatter,
+    _build_header,
+    _format_body_text,
+    _format_time,
+    _guess_media_kind,
+    _human_size,
+    _join_header_body,
+    _needs_separator,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -144,3 +156,110 @@ class TestGuessMediaKind:
     # Extension appearing in the middle of filename should not trigger false match
     def test_mp4_in_name_not_extension_is_document(self):
         assert _guess_media_kind("mp4_notes.txt") == "document"
+
+
+# ---------------------------------------------------------------------------
+# _format_time
+# ---------------------------------------------------------------------------
+
+class TestFormatTime:
+    def test_none_returns_empty(self):
+        assert _format_time(None) == ""
+
+    def test_invalid_returns_empty(self):
+        assert _format_time("not-a-number") == ""
+
+    def test_seconds_timestamp(self):
+        ts = int(datetime(2024, 6, 18, 14, 30, tzinfo=timezone.utc).timestamp())
+        assert _format_time(ts) == datetime.fromtimestamp(ts).strftime("%H:%M")
+
+    def test_milliseconds_timestamp(self):
+        ts = int(datetime(2024, 6, 18, 9, 5, tzinfo=timezone.utc).timestamp()) * 1000
+        assert _format_time(ts) == datetime.fromtimestamp(ts // 1000).strftime("%H:%M")
+
+
+# ---------------------------------------------------------------------------
+# _needs_separator
+# ---------------------------------------------------------------------------
+
+class TestNeedsSeparator:
+    def test_disabled(self):
+        assert _needs_separator(("c", "s"), "c", "s2", False) is False
+
+    def test_first_message_no_separator(self):
+        assert _needs_separator(None, "c", "s", True) is False
+
+    def test_same_sender_no_separator(self):
+        assert _needs_separator(("c", "s"), "c", "s", True) is False
+
+    def test_different_sender_separator(self):
+        assert _needs_separator(("c", "s1"), "c", "s2", True) is True
+
+
+# ---------------------------------------------------------------------------
+# _build_header
+# ---------------------------------------------------------------------------
+
+class TestBuildHeader:
+    def test_plain_dm(self):
+        assert _build_header("Ivan", "", True, "plain", None, True) == "✉ <b>Ivan</b>"
+
+    def test_plain_group_with_chat(self):
+        result = _build_header("Ivan", "Work", False, "plain", None, True)
+        assert result == "💬 <b>Work</b> | Ivan"
+
+    def test_enhanced_dm_with_time(self):
+        ts = int(datetime(2024, 6, 18, 14, 30, tzinfo=timezone.utc).timestamp())
+        result = _build_header("Ivan", "", True, "enhanced", ts, True)
+        assert result.startswith("✉ <b>Ivan</b> ·")
+
+    def test_enhanced_group_two_lines(self):
+        ts = int(datetime(2024, 6, 18, 14, 30, tzinfo=timezone.utc).timestamp())
+        result = _build_header("Petr", "Work", False, "enhanced", ts, True)
+        assert "💬 <b>Work</b>" in result
+        assert "👤 <b>Petr</b>" in result
+
+
+# ---------------------------------------------------------------------------
+# _format_body_text
+# ---------------------------------------------------------------------------
+
+class TestFormatBodyText:
+    def test_plain(self):
+        assert _format_body_text("hi", "plain") == "hi"
+
+    def test_enhanced_blockquote(self):
+        assert _format_body_text("hi", "enhanced") == "<blockquote>hi</blockquote>"
+
+    def test_no_blockquote_override(self):
+        assert _format_body_text("hi", "enhanced", use_blockquote=False) == "hi"
+
+
+# ---------------------------------------------------------------------------
+# MessageFormatter
+# ---------------------------------------------------------------------------
+
+class TestMessageFormatter:
+    def test_enhanced_adds_separator_on_sender_change(self):
+        fmt = MessageFormatter(style="enhanced")
+        first = fmt.begin_message("c1", "u1", "Ivan", "", False, None)
+        second = fmt.begin_message("c1", "u2", "Petr", "", False, None)
+        assert SEPARATOR_LINE not in first
+        assert SEPARATOR_LINE in second
+
+    def test_compact_hides_repeated_header(self):
+        fmt = MessageFormatter(style="compact")
+        first = fmt.format_text_message("c1", "u1", "Ivan", "", False, "hi", None)
+        second = fmt.format_text_message("c1", "u1", "Ivan", "", False, "again", None)
+        assert "Ivan" in first
+        assert "Ivan" not in second
+        assert "<blockquote>again</blockquote>" in second
+
+    def test_plain_matches_legacy_format(self):
+        fmt = MessageFormatter(style="plain", separator_enabled=True, show_timestamp=True)
+        text = fmt.format_text_message("c1", "u1", "Ivan", "Work", False, "hello", None)
+        assert text == "💬 <b>Work</b> | Ivan\nhello"
+
+    def test_join_header_body(self):
+        assert _join_header_body("hdr", "body") == "hdr\n\nbody"
+        assert _join_header_body("", "body") == "body"
