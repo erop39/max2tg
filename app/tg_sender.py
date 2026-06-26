@@ -41,6 +41,7 @@ class TelegramSender:
         request = HTTPXRequest(proxy=proxy_url, read_timeout=read_timeout, write_timeout=write_timeout, media_write_timeout=media_write_timeout)
         self._bot = Bot(token=token, request=request)
         self._chat_id = chat_id
+        self._last_max_chat_id = None
 
     @property
     def bot(self) -> Bot:
@@ -53,6 +54,21 @@ class TelegramSender:
 
     async def stop(self):
         await self._bot.shutdown()
+
+    async def send_chat_separator(self, max_chat_id) -> None:
+        """Send a visual separator when the source Max chat changes."""
+        if max_chat_id == self._last_max_chat_id:
+            return
+        prev = self._last_max_chat_id
+        self._last_max_chat_id = max_chat_id
+        if prev is None:
+            return
+        await self._retry(
+            lambda: self._bot.send_message(
+                chat_id=self._chat_id,
+                text="─" * 20,
+            )
+        )
 
     def _truncate_caption(self, text: str) -> str:
         if len(text) > TG_CAPTION_MAX:
@@ -128,23 +144,37 @@ class TelegramSender:
             )
         )
 
-    async def send_voice(self, data: bytes, caption: str = "", reply_markup=None) -> None:
+    async def send_voice(self, data: bytes, caption: str = "", filename: str = "", reply_markup=None) -> None:
         caption = self._truncate_caption(caption)
+        voice_name = filename if filename.lower().endswith(".ogg") else "voice.ogg"
         result = await self._retry(
             lambda: self._bot.send_voice(
                 chat_id=self._chat_id,
-                voice=InputFile(io.BytesIO(data), filename="voice.ogg"),
+                voice=InputFile(io.BytesIO(data), filename=voice_name),
                 caption=caption or None,
                 parse_mode=ParseMode.HTML,
                 reply_markup=reply_markup,
             )
         )
         if result is None:
-            log.info("send_voice failed, falling back to send_audio")
-            await self._retry(
+            audio_name = filename or "audio.mp3"
+            log.info("send_voice failed, falling back to send_audio (filename=%s)", audio_name)
+            result = await self._retry(
                 lambda: self._bot.send_audio(
                     chat_id=self._chat_id,
-                    audio=InputFile(io.BytesIO(data), filename="audio.m4a"),
+                    audio=InputFile(io.BytesIO(data), filename=audio_name),
+                    caption=caption or None,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=reply_markup,
+                )
+            )
+        if result is None:
+            audio_name = filename or "audio.mp3"
+            log.info("send_audio failed, falling back to send_document (filename=%s)", audio_name)
+            await self._retry(
+                lambda: self._bot.send_document(
+                    chat_id=self._chat_id,
+                    document=InputFile(io.BytesIO(data), filename=audio_name),
                     caption=caption or None,
                     parse_mode=ParseMode.HTML,
                     reply_markup=reply_markup,

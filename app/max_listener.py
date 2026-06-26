@@ -119,11 +119,13 @@ async def _send_attach(
         return True
 
     if atype == "AUDIO":
-        url = attach.get("url")
+        url = attach.get("url") or attach.get("baseUrl")
+        name = attach.get("name") or attach.get("fileName") or ""
+        log.info("AUDIO attach url=%s name=%s keys=%s", url, name, list(attach.keys()))
         if url:
             data = await client.download_file(url)
             if data:
-                await sender.send_voice(data, caption=header_text, reply_markup=kb)
+                await sender.send_voice(data, caption=header_text, filename=name, reply_markup=kb)
                 return True
         await sender.send(f"{header_text}\n<i>[аудио]</i>", reply_markup=kb)
         return True
@@ -271,6 +273,7 @@ async def forward_message(
     resolver: ContactResolver,
     reply_enabled: bool = False,
 ) -> None:
+    await sender.send_chat_separator(msg.chat_id)
     sender_label = escape(await resolver.resolve_user(msg.sender_id))
     is_dm = resolver.is_dm(msg.chat_id)
     if len(client.chat_ids) == 1:
